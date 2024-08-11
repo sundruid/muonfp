@@ -1,0 +1,109 @@
+use pnet::datalink::{self, Channel::Ethernet};
+use pnet::packet::{Packet, ethernet::EthernetPacket};
+use std::env;
+use std::fs::File;
+use std::io::Write;
+use std::process;
+
+fn main() {
+    // Parse the command-line arguments to get the network interface
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <network interface>", args[0]);
+        process::exit(1);
+    }
+    let interface_name = &args[1];
+
+    // Find the network interface to use
+    let interfaces = datalink::interfaces();
+    let interface = interfaces
+        .into_iter()
+        .find(|iface| iface.name == *interface_name)
+        .unwrap_or_else(|| {
+            eprintln!("Error: Network interface {} not found", interface_name);
+            process::exit(1);
+        });
+
+    // Create a channel to capture packets
+    let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
+        Ok(Ethernet(tx, rx)) => (tx, rx),
+        Ok(_) => {
+            eprintln!("Unhandled channel type");
+            process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Error creating datalink channel: {}", e);
+            process::exit(1);
+        }
+    };
+
+    // Create a pcap file to log packets
+    let mut file = File::create("packets.pcap").expect("Failed to create file");
+
+    // Write the PCAP global header
+    let pcap_global_header = pcap_file_header();
+    file.write_all(&pcap_global_header)
+        .expect("Failed to write global header");
+
+    println!("Listening on interface: {}", interface_name);
+
+    // Capture and log packets
+    loop {
+        match rx.next() {
+            Ok(packet) => {
+                println!("Captured a packet of length: {}", packet.len());
+                let ethernet = EthernetPacket::new(packet).unwrap();
+
+                // Write packet to file with pcap packet header
+                let pcap_packet_header = pcap_packet_header(ethernet.packet().len() as u32);
+                file.write_all(&pcap_packet_header)
+                    .expect("Failed to write packet header");
+                file.write_all(ethernet.packet())
+                    .expect("Failed to write packet data");
+            }
+            Err(e) => {
+                eprintln!("Failed to read packet: {}", e);
+            }
+        }
+    }
+}
+
+// Function to create a PCAP global header
+fn pcap_file_header() -> [u8; 24] {
+    [
+        0xd4, 0xc3, 0xb2, 0xa1, // Magic number
+        0x02, 0x00, 0x04, 0x00, // Version major and minor
+        0x00, 0x00, 0x00, 0x00, // Thiszone (GMT)
+        0x00, 0x00, 0x00, 0x00, // Sigfigs
+        0xff, 0xff, 0x00, 0x00, // Snaplen
+        0x01, 0x00, 0x00, 0x00, // Network (Ethernet)
+    ]
+}
+
+// Function to create a PCAP packet header
+fn pcap_packet_header(packet_length: u32) -> [u8; 16] {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Time went backwards");
+    let secs = timestamp.as_secs() as u32;
+    let usecs = timestamp.subsec_micros() as u32;
+
+    [
+        (secs & 0xff) as u8,
+        ((secs >> 8) & 0xff) as u8,
+        ((secs >> 16) & 0xff) as u8,
+        ((secs >> 24) & 0xff) as u8,
+        (usecs & 0xff) as u8,
+        ((usecs >> 8) & 0xff) as u8,
+        ((usecs >> 16) & 0xff) as u8,
+        ((usecs >> 24) & 0xff) as u8,
+        (packet_length & 0xff) as u8,
+        ((packet_length >> 8) & 0xff) as u8,
+        ((packet_length >> 16) & 0xff) as u8,
+        ((packet_length >> 24) & 0xff) as u8,
+        (packet_length & 0xff) as u8,
+        ((packet_length >> 8) & 0xff) as u8,
+        ((packet_length >> 16) & 0xff) as u8,
+        ((packet_length >> 24) & 0xff) as u8,
+    ]
+}
