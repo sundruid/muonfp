@@ -1,5 +1,7 @@
 /target
 
-# Ignore backups
-*.bak
 *.bak*
+muonfp.out
+packets.pcap
+Cargo.lock
+.gitignore
