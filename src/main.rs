@@ -13,6 +13,9 @@ use std::net::IpAddr;
 use std::process;
 
 fn main() {
+
+    println!("MuonFP v.1");
+
     // Parse the command-line arguments to get the network interface
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
