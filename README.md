@@ -25,11 +25,11 @@ This is comprised of the following from the TCP packet header provided during co
 
 # Install Instructions (example in Debian)
 
--mkdir muonfp  
--cd muonfp  
--Download the zip file and extract    
--curl -O -L https://github.com/sundruid/muonfp/releases/download/DebianV.1.1/muonfp_deb_v_1_1.zip  
--tar -xvf muonfp_deb_v_1_1.tar.gz  
+      mkdir muonfp  
+      cd muonfp  
+      Download the zip file and extract    
+      curl -O -L https://github.com/sundruid/muonfp/releases/download/DebianV.1.1/muonfp_deb_v_1_1.tar.gz 
+      tar -xvf muonfp_deb_v_1_1.tar.gz  
    
 vi muonfp_deb_v_1_1
 
