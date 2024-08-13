@@ -1,38 +1,99 @@
 use pnet::datalink::{self, Channel::Ethernet};
-use pnet::packet::{
-    ethernet::EthernetPacket,
-    ipv4::Ipv4Packet,
-    tcp::TcpFlags,
-    Packet,
-};
+use pnet::packet::{ethernet::EthernetPacket, ipv4::Ipv4Packet, Packet};
 use std::collections::HashSet;
 use std::env;
-use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::fs::read_to_string;
 use std::net::IpAddr;
-use std::process;
+use std::path::{Path, PathBuf};
+
+mod fingerprint;
+mod rotating_writer;
+use fingerprint::{Fingerprint, extract_tcp_options, is_syn_packet};
+use rotating_writer::RotatingFileWriter;
+
+struct Config {
+    interface: String,
+    fingerprints_dir: String,
+    pcap_dir: String,
+    max_file_size: u64,
+}
+
+fn read_config() -> Result<Config, Box<dyn std::error::Error>> {
+    let config_paths = [
+        PathBuf::from("muonfp.conf"),
+        PathBuf::from("/etc/muonfp.conf"),
+        env::current_exe()?.with_file_name("muonfp.conf"),
+    ];
+
+    let config_content = config_paths.iter()
+        .find_map(|path| {
+            match read_to_string(path) {
+                Ok(content) => {
+                    println!("Using config file: {}", path.display());
+                    Some(content)
+                },
+                Err(_) => None,
+            }
+        })
+        .ok_or("Could not find or read muonfp.conf. Looked in current directory, /etc/, and next to the executable.")?;
+
+    let mut interface = String::new();
+    let mut fingerprints_dir = String::new();
+    let mut pcap_dir = String::new();
+    let mut max_file_size = 100 * 1024 * 1024; // Default to 100MB
+
+    for line in config_content.lines() {
+        let parts: Vec<&str> = line.splitn(2, '=').collect();
+        if parts.len() == 2 {
+            match parts[0].trim() {
+                "interface" => interface = parts[1].trim().to_string(),
+                "fingerprints" => fingerprints_dir = parts[1].trim().to_string(),
+                "pcap" => pcap_dir = parts[1].trim().to_string(),
+                "max_file_size" => max_file_size = parts[1].trim().parse::<u64>()? * 1024 * 1024,
+                _ => eprintln!("Unknown configuration option: {}", parts[0]),
+            }
+        }
+    }
+
+    if interface.is_empty() || fingerprints_dir.is_empty() || pcap_dir.is_empty() {
+        return Err("Missing required configuration options".into());
+    }
+
+    Ok(Config {
+        interface,
+        fingerprints_dir,
+        pcap_dir,
+        max_file_size,
+    })
+}
 
 fn main() {
-
     println!("MuonFP v.1");
 
-    // Parse the command-line arguments to get the network interface
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <network interface>", args[0]);
-        process::exit(1);
+    if let Err(e) = run() {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
     }
-    let interface_name = &args[1];
+}
+
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    // Read configuration
+    let config = read_config()?;
+
+    // Validate directories
+    if !Path::new(&config.fingerprints_dir).is_dir() {
+        return Err(format!("Fingerprints directory does not exist: {}", config.fingerprints_dir).into());
+    }
+    if !Path::new(&config.pcap_dir).is_dir() {
+        return Err(format!("PCAP directory does not exist: {}", config.pcap_dir).into());
+    }
 
     // Find the network interface to use
     let interfaces = datalink::interfaces();
     let interface = interfaces
         .iter()
-        .find(|iface| iface.name == *interface_name)
-        .unwrap_or_else(|| {
-            eprintln!("Error: Network interface {} not found", interface_name);
-            process::exit(1);
-        });
+        .find(|iface| iface.name == config.interface)
+        .ok_or_else(|| format!("Error: Network interface {} not found", config.interface))?;
 
     // Collect all IP addresses of the local interface
     let local_ips: HashSet<IpAddr> = interface
@@ -44,28 +105,25 @@ fn main() {
     // Create a channel to capture packets
     let mut rx = match datalink::channel(interface, Default::default()) {
         Ok(Ethernet(_, rx)) => rx,
-        Ok(_) => {
-            eprintln!("Unhandled channel type");
-            process::exit(1);
-        }
-        Err(e) => {
-            eprintln!("Error creating datalink channel: {}", e);
-            process::exit(1);
-        }
+        Ok(_) => return Err("Unhandled channel type".into()),
+        Err(e) => return Err(format!("Error creating datalink channel: {}", e).into()),
     };
 
-    // Create a pcap file to log packets
-    let mut pcap_file = File::create("packets.pcap").expect("Failed to create pcap file");
-    let mut signatures_file =
-        BufWriter::new(File::create("muonfp.out").expect("Failed to create muonfp.out file"));
+    // Create rotating writers
+    let mut pcap_writer = RotatingFileWriter::new(
+        Path::new(&config.pcap_dir).join("packets"),
+        config.max_file_size
+    )?;
+    let mut fingerprint_writer = RotatingFileWriter::new(
+        Path::new(&config.fingerprints_dir).join("muonfp"),
+        config.max_file_size
+    )?;
 
     // Write the PCAP global header
     let pcap_global_header = pcap_file_header();
-    pcap_file
-        .write_all(&pcap_global_header)
-        .expect("Failed to write global header");
+    pcap_writer.write(&pcap_global_header)?;
 
-    println!("Listening on interface: {}", interface_name);
+    println!("Listening on interface: {}", config.interface);
 
     // Capture and log packets
     loop {
@@ -75,12 +133,8 @@ fn main() {
 
                 // Write packet to pcap file with pcap packet header
                 let pcap_packet_header = pcap_packet_header(ethernet.packet().len() as u32);
-                pcap_file
-                    .write_all(&pcap_packet_header)
-                    .expect("Failed to write packet header");
-                pcap_file
-                    .write_all(ethernet.packet())
-                    .expect("Failed to write packet data");
+                pcap_writer.write(&pcap_packet_header)?;
+                pcap_writer.write(ethernet.packet())?;
 
                 if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
                     let source_ip = IpAddr::V4(ip_packet.get_source());
@@ -105,70 +159,13 @@ fn main() {
                     if ip_packet.get_next_level_protocol().0 == 6 { // TCP protocol
                         let tcp_payload = ip_packet.payload();
                         if tcp_payload.len() >= 20 { // Minimum TCP header size
-                            // Extract TCP flags
                             let flags = tcp_payload[13];
-                            let is_syn = flags & TcpFlags::SYN as u8 != 0;
-                            let is_ack = flags & TcpFlags::ACK as u8 != 0;
-
-                            // Process SYN packets for incoming connections and SYN-ACK for outgoing
-                            if (is_incoming && is_syn && !is_ack) || (!is_incoming && is_syn && is_ack) {
-                                // Extract TCP window size
+                            
+                            if is_syn_packet(flags, is_incoming) {
                                 let window_size = u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
+                                let (options_str, mss, window_scale) = extract_tcp_options(tcp_payload);
 
-                                // Extract TCP options
-                                let mut options_str = String::new();
-                                let mut mss = String::new();
-                                let mut window_scale = String::new();
-
-                                // Calculate the TCP header length
-                                let tcp_header_length = ((tcp_payload[12] >> 4) as usize) * 4;
-                                let options_slice = &tcp_payload[20..tcp_header_length];
-
-                                let mut i = 0;
-                                while i < options_slice.len() {
-                                    let kind = options_slice[i];
-                                    match kind {
-                                        0 => { // End of Options List
-                                            options_str.push_str("0-");
-                                            break; // End of options
-                                        },
-                                        1 => { // No Operation
-                                            options_str.push_str("1-");
-                                            i += 1;
-                                        },
-                                        2 => { // MSS
-                                            if options_slice.len() >= i + 4 {
-                                                mss = u16::from_be_bytes([options_slice[i+2], options_slice[i+3]]).to_string();
-                                            }
-                                            options_str.push_str("2-");
-                                            i += 4;
-                                        },
-                                        3 => { // Window Scale
-                                            if options_slice.len() >= i + 3 {
-                                                window_scale = options_slice[i+2].to_string();
-                                            }
-                                            options_str.push_str("3-");
-                                            i += 3;
-                                        },
-                                        _ => {
-                                            options_str.push_str(&format!("{}-", kind));
-                                            if options_slice.len() > i + 1 {
-                                                let length = options_slice[i + 1] as usize;
-                                                if length < 2 { break; } // Invalid length, stop processing
-                                                i += length;
-                                            } else {
-                                                break; // Not enough data for option length, stop processing
-                                            }
-                                        },
-                                    }
-                                }
-
-                                // Remove trailing dash if present
-                                options_str = options_str.trim_end_matches('-').to_string();
-
-                                // Format the signature
-                                let signature = format!(
-                                    "{}:{}:{}:{}:{}\n",
+                                let fingerprint = Fingerprint::new(
                                     fingerprint_ip,
                                     window_size,
                                     options_str,
@@ -177,10 +174,8 @@ fn main() {
                                 );
 
                                 // Write signature to file
-                                signatures_file
-                                    .write_all(signature.as_bytes())
-                                    .expect("Failed to write signature");
-                                signatures_file.flush().expect("Failed to flush muonfp.out file");
+                                fingerprint_writer.write(fingerprint.to_string().as_bytes())?;
+                                fingerprint_writer.flush()?;
                             }
                         }
                     }
