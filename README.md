@@ -40,4 +40,6 @@ vi muonfp_deb_v_1_1
 
 Esc, :, x, Enter. 
 
-    sudo ./muonfp_deb_v_1_1 &       # & on the end will put it into the background. Logging out will kill process. Install as service to keep alive.
+    sudo ./muonfp_deb_v_1_1 &       # & on the end will put it into the background. 
+                                    # Logging out will kill process. 
+                                    # Install as service to keep alive.
