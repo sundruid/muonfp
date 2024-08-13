@@ -1,18 +1,18 @@
-use pnet::datalink::{self, Channel::Ethernet};
-use pnet::packet::Packet;
-use pnet::packet::ethernet::EthernetPacket;
-use pnet::packet::ipv4::Ipv4Packet;
-use std::collections::HashSet;
-use std::env;
 use std::fs::read_to_string;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use std::env;
+use pnet::packet::Packet;
+use pnet::packet::ipv4::Ipv4Packet;
 
 mod fingerprint;
 mod rotating_writer;
+mod network_tap;
+
 use fingerprint::{Fingerprint, extract_tcp_options, is_syn_packet};
 use rotating_writer::RotatingFileWriter;
+use network_tap::{NetworkTap, pcap_global_header, pcap_packet_header};
 
 struct Config {
     interface: String,
@@ -71,7 +71,7 @@ fn read_config() -> Result<Config, Box<dyn std::error::Error>> {
 }
 
 fn main() {
-    println!("MuonFP v.1");
+    println!("MuonFP v.1.1");
 
     if let Err(e) = run() {
         eprintln!("Error: {}", e);
@@ -80,7 +80,6 @@ fn main() {
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // Read configuration
     let config = read_config()?;
 
     // Validate directories
@@ -91,26 +90,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("PCAP directory does not exist: {}", config.pcap_dir).into());
     }
 
-    // Find the network interface to use
-    let interfaces = datalink::interfaces();
-    let interface = interfaces
-        .iter()
-        .find(|iface| iface.name == config.interface)
-        .ok_or_else(|| format!("Error: Network interface {} not found", config.interface))?;
-
-    // Collect all IP addresses of the local interface
-    let local_ips: HashSet<IpAddr> = interface
-        .ips
-        .iter()
-        .map(|ip_network| ip_network.ip())
-        .collect();
-
-    // Create a channel to capture packets
-    let mut rx = match datalink::channel(interface, Default::default()) {
-        Ok(Ethernet(_, rx)) => rx,
-        Ok(_) => return Err("Unhandled channel type".into()),
-        Err(e) => return Err(format!("Error creating datalink channel: {}", e).into()),
-    };
+    let mut network_tap = NetworkTap::new(&config.interface)?;
+    let local_ips = network_tap.local_ips.clone();
 
     // Create rotating writers
     let mut pcap_writer = RotatingFileWriter::new(
@@ -123,17 +104,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     // Write the PCAP global header
-    let pcap_global_header = pcap_file_header();
+    let pcap_global_header = pcap_global_header();
     pcap_writer.write_all(&pcap_global_header)?;
 
     println!("Listening on interface: {}", config.interface);
 
     // Capture and log packets
     loop {
-        match rx.next() {
-            Ok(packet) => {
-                let ethernet = EthernetPacket::new(packet).unwrap();
-
+        match network_tap.next_packet() {
+            Ok(ethernet) => {
                 // Write packet to pcap file with pcap packet header
                 let pcap_packet_header = pcap_packet_header(ethernet.packet().len() as u32);
                 pcap_writer.write_all(&pcap_packet_header)?;
@@ -185,48 +164,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(e) => {
-                eprintln!("Failed to read packet: {}", e);
+                eprintln!("Error: {}", e);
             }
         }
     }
-}
-
-// Function to create a PCAP global header
-fn pcap_file_header() -> [u8; 24] {
-    [
-        0xd4, 0xc3, 0xb2, 0xa1, // Magic number
-        0x02, 0x00, 0x04, 0x00, // Version major and minor
-        0x00, 0x00, 0x00, 0x00, // Thiszone (GMT)
-        0x00, 0x00, 0x00, 0x00, // Sigfigs
-        0xff, 0xff, 0x00, 0x00, // Snaplen
-        0x01, 0x00, 0x00, 0x00, // Network (Ethernet)
-    ]
-}
-
-// Function to create a PCAP packet header
-fn pcap_packet_header(packet_length: u32) -> [u8; 16] {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("Time went backwards");
-    let secs = timestamp.as_secs() as u32;
-    let usecs = timestamp.subsec_micros() as u32;
-
-    [
-        (secs & 0xff) as u8,
-        ((secs >> 8) & 0xff) as u8,
-        ((secs >> 16) & 0xff) as u8,
-        ((secs >> 24) & 0xff) as u8,
-        (usecs & 0xff) as u8,
-        ((usecs >> 8) & 0xff) as u8,
-        ((usecs >> 16) & 0xff) as u8,
-        ((usecs >> 24) & 0xff) as u8,
-        (packet_length & 0xff) as u8,
-        ((packet_length >> 8) & 0xff) as u8,
-        ((packet_length >> 16) & 0xff) as u8,
-        ((packet_length >> 24) & 0xff) as u8,
-        (packet_length & 0xff) as u8,
-        ((packet_length >> 8) & 0xff) as u8,
-        ((packet_length >> 16) & 0xff) as u8,
-        ((packet_length >> 24) & 0xff) as u8,
-    ]
 }
