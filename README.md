@@ -20,8 +20,9 @@ This is comprised of the following from the TCP packet header provided during co
 - TCP Maximum Segment Size (MSS) which can provide interesting info including use of VPNs
 - TCP Window Scale, which is a scaling factor used for TCP Window Size and allows for larger TCP windows
 
-# Future Development
+# Version .1.1 Update
 
-- Create a config file to use instead of CLI flags  
-- Break pcap files out by size and also consider S3 bucket support and specifying file-directory location  
-- Add ability to read pcap files already created and fingerprint from that input source (no tap, or bring your own tap)  
+- Uses muonfp.conf to provide configurable file paths for logging with filesize limits
+- Rotating logging
+- Converted muonfp fingerprinting output to json single line delimited format, added timestamp field
+- Refactored code files to ease maintenance
