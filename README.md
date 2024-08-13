@@ -42,6 +42,6 @@ vi muonfp_deb_v_1_1
     pcap=.             # your directory of choice, you can send to /dev/null if you do not want pcaps
     max_file_size=100  # max file size before log rotation occurs in MB
 
-Esc, :, x, Enter
+Esc, :, x, Enter. 
 
-sudo ./muonfp &       # & on the end will put it into the background. Logging out will kill process. Install as service to keep alive.
+    sudo ./muonfp_deb_v_1_1 &       # & on the end will put it into the background. Logging out will kill process. Install as service to keep alive.
