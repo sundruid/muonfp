@@ -26,3 +26,22 @@ This is comprised of the following from the TCP packet header provided during co
 - Rotating logging
 - Converted muonfp fingerprinting output to json single line delimited format, added timestamp field
 - Refactored code files to ease maintenance
+
+# Install Instructions
+
+mkdir muonfp
+cd muonfp
+Download the zip file and extract
+   curl -O -L https://github.com/sundruid/muonfp/releases/download/DebianV.1.1/muonfp_deb_v_1_1.zip
+   tar -xvf muonfp_deb_v_1_1.tar.gz
+   
+vi muonfp_deb_v_1_1
+
+    interface=en0      # do an 'ip addr show' to find interface name
+    fingerprints=.     # your directory of choice
+    pcap=.             # your directory of choice, you can send to /dev/null if you do not want pcaps
+    max_file_size=100  # max file size before log rotation occurs in MB
+
+Esc, :, x, Enter
+
+sudo ./muonfp &       # & on the end will put it into the background. Logging out will kill process. Install as service to keep alive.
