@@ -27,7 +27,7 @@ This is comprised of the following from the TCP packet header provided during co
 - Converted muonfp fingerprinting output to json single line delimited format, added timestamp field
 - Refactored code files to ease maintenance
 
-# Install Instructions
+# Install Instructions (example in Debian)
 
 mkdir muonfp
 cd muonfp
