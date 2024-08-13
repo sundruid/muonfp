@@ -1,4 +1,4 @@
-# muonfp
+# MuonFP
 MuonFP is a TCP passive fingerprinter written in Rust that has no external dependencies such as WireShark or other open source software.
 
 Usage:
@@ -7,7 +7,7 @@ sudo muonfp eth0
 
 The program will create an network tap on the interface specified and log all pcaps to the packets.pcap file. SYN and SYN-ACK packets that can be fingerprinted will be logged in the muonfp.out file.
 
-# Fingerprint format
+# Fingerprint Format
 The fingerprint is derived from pseudo-unique setting in the TCP configuration during the SYN and SYN-ACK stages. A fingerprint from these packets will yield the following:
 
 192.168.4.80:26847:2-4-8-1-3:1460:8
