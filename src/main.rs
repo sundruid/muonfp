@@ -1,8 +1,11 @@
 use pnet::datalink::{self, Channel::Ethernet};
-use pnet::packet::{ethernet::EthernetPacket, ipv4::Ipv4Packet, Packet};
+use pnet::packet::Packet;
+use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ipv4::Ipv4Packet;
 use std::collections::HashSet;
 use std::env;
 use std::fs::read_to_string;
+use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
@@ -121,7 +124,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Write the PCAP global header
     let pcap_global_header = pcap_file_header();
-    pcap_writer.write(&pcap_global_header)?;
+    pcap_writer.write_all(&pcap_global_header)?;
 
     println!("Listening on interface: {}", config.interface);
 
@@ -133,8 +136,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Write packet to pcap file with pcap packet header
                 let pcap_packet_header = pcap_packet_header(ethernet.packet().len() as u32);
-                pcap_writer.write(&pcap_packet_header)?;
-                pcap_writer.write(ethernet.packet())?;
+                pcap_writer.write_all(&pcap_packet_header)?;
+                pcap_writer.write_all(ethernet.packet())?;
 
                 if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
                     let source_ip = IpAddr::V4(ip_packet.get_source());
@@ -173,8 +176,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     window_scale
                                 );
 
-                                // Write signature to file
-                                fingerprint_writer.write(fingerprint.to_string().as_bytes())?;
+                                // Write JSON line to file
+                                writeln!(fingerprint_writer, "{}", fingerprint.to_json())?;
                                 fingerprint_writer.flush()?;
                             }
                         }

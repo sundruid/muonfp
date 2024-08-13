@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write, BufWriter};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct RotatingFileWriter {
@@ -52,24 +52,28 @@ impl RotatingFileWriter {
 
         Ok(())
     }
+}
 
-    pub fn write(&mut self, buffer: &[u8]) -> io::Result<()> {
-        if self.current_size + buffer.len() as u64 > self.max_size {
+impl Write for RotatingFileWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.current_size + buf.len() as u64 > self.max_size {
             self.rotate()?;
         }
 
         if let Some(file) = self.current_file.as_mut() {
-            file.write_all(buffer)?;
-            self.current_size += buffer.len() as u64;
+            let bytes_written = file.write(buf)?;
+            self.current_size += bytes_written as u64;
+            Ok(bytes_written)
+        } else {
+            Err(io::Error::new(io::ErrorKind::Other, "No file currently open"))
         }
-
-        Ok(())
     }
 
-    pub fn flush(&mut self) -> io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         if let Some(file) = self.current_file.as_mut() {
-            file.flush()?;
+            file.flush()
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 }

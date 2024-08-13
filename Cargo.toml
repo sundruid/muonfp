@@ -7,4 +7,6 @@ edition = "2021"
 pnet = "0.35.0"
 pcap = "2.0.0"
 time = "0.3.36"
-
+chrono = { version = "0.4.38", features = ["serde"] }
+serde = { version = "1.0.207", features = ["derive"] }
+serde_json = "1.0.124"

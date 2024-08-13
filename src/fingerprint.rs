@@ -1,34 +1,34 @@
 use std::net::IpAddr;
 use pnet::packet::tcp::TcpFlags;
+use chrono::{DateTime, Utc};
+use serde::Serialize;
 
+#[derive(Serialize)]
 pub struct Fingerprint {
-    pub ip: IpAddr,
-    pub window_size: u16,
-    pub options: String,
-    pub mss: String,
-    pub window_scale: String,
+    pub timestamp: DateTime<Utc>,
+    pub ip_address: IpAddr,
+    pub muonfp_fingerprint: String,
 }
 
 impl Fingerprint {
     pub fn new(ip: IpAddr, window_size: u16, options: String, mss: String, window_scale: String) -> Self {
-        Fingerprint {
-            ip,
+        let muonfp_fingerprint = format!(
+            "{}:{}:{}:{}",
             window_size,
             options,
             mss,
-            window_scale,
+            window_scale
+        );
+
+        Fingerprint {
+            timestamp: Utc::now(),
+            ip_address: ip,
+            muonfp_fingerprint,
         }
     }
 
-    pub fn to_string(&self) -> String {
-        format!(
-            "{}:{}:{}:{}:{}\n",
-            self.ip,
-            self.window_size,
-            self.options,
-            self.mss,
-            self.window_scale
-        )
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| String::from("{}"))
     }
 }
 
