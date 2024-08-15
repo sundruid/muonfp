@@ -35,7 +35,7 @@ vi muonfp_deb_v_1_1
     interface=en0      # do an 'ip addr show' to find interface name
     fingerprints=.     # your directory of choice
     pcap=.             # your directory of choice, you can set to /dev/null if you do not want pcaps
-    max_file_size=10  # max file size before log rotation occurs in MB
+    max_file_size=10   # max file size before log rotation occurs in MB
 
 Esc, :, x, Enter. 
 
