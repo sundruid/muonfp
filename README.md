@@ -26,8 +26,7 @@ This is comprised of the following from the TCP packet header provided during co
 # Install Instructions (example in Debian)
 
       mkdir muonfp  
-      cd muonfp  
-      Download the zip file and extract    
+      cd muonfp   
       curl -O -L https://github.com/sundruid/muonfp/releases/download/DebianV.1.1/muonfp_deb_v_1_1.tar.gz 
       tar -xvf muonfp_deb_v_1_1.tar.gz  
    
@@ -35,11 +34,14 @@ vi muonfp_deb_v_1_1
 
     interface=en0      # do an 'ip addr show' to find interface name
     fingerprints=.     # your directory of choice
-    pcap=.             # your directory of choice, you can send to /dev/null if you do not want pcaps
-    max_file_size=100  # max file size before log rotation occurs in MB
+    pcap=.             # your directory of choice, you can set to /dev/null if you do not want pcaps
+    max_file_size=10  # max file size before log rotation occurs in MB
 
 Esc, :, x, Enter. 
 
     sudo ./muonfp_deb_v_1_1 &       # & on the end will put it into the background. 
                                     # Logging out will kill process. 
-                                    # Install as service to keep alive.
+                                    # Execute with nohup to keep alive. -> nohup sudo ./muonfp_deb_v_1_1 &
+                                          # to retrieve:
+                                          # jobs
+                                          # fg <job #>
