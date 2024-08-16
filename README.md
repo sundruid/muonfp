@@ -16,6 +16,8 @@ This is comprised of the following from the TCP packet header provided during co
 - TCP Maximum Segment Size (MSS) which can provide interesting info including use of VPNs
 - TCP Window Scale, which is a scaling factor used for TCP Window Size and allows for larger TCP windows
 
+Repo Contact: sundruid@protonmail.com
+
 # v.1.1 Update
 
 - Uses muonfp.conf to provide configurable file paths for logging with filesize limits
