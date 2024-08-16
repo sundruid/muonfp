@@ -5,13 +5,14 @@ use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct Fingerprint {
+    pub hostname: String,
     pub timestamp: DateTime<Utc>,
     pub ip_address: IpAddr,
     pub muonfp_fingerprint: String,
 }
 
 impl Fingerprint {
-    pub fn new(ip: IpAddr, window_size: u16, options: String, mss: String, window_scale: String) -> Self {
+    pub fn new(hostname: String, ip: IpAddr, window_size: u16, options: String, mss: String, window_scale: String) -> Self {
         let muonfp_fingerprint = format!(
             "{}:{}:{}:{}",
             window_size,
@@ -19,8 +20,8 @@ impl Fingerprint {
             mss,
             window_scale
         );
-
         Fingerprint {
+            hostname,
             timestamp: Utc::now(),
             ip_address: ip,
             muonfp_fingerprint,

@@ -145,18 +145,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             if is_syn_packet(flags, is_incoming) {
                                 let window_size = u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
                                 let (options_str, mss, window_scale) = extract_tcp_options(tcp_payload);
-
+                            
                                 let fingerprint = Fingerprint::new(
+                                    hostname.clone(),
                                     fingerprint_ip,
                                     window_size,
                                     options_str,
                                     mss,
                                     window_scale
                                 );
-
-                                // Write JSON line to file with hostname
-                                writeln!(fingerprint_writer, "{},{}", hostname, fingerprint.to_json())?;
+                            
+                                // Write JSON line to file
+                                writeln!(fingerprint_writer, "{}", fingerprint.to_json())?;
                             }
+                            
                         }
                     }
                 }
