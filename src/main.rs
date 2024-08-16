@@ -1,10 +1,17 @@
-use std::fs::read_to_string;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::env;
+use std::time::Duration;
 use pnet::packet::Packet;
 use pnet::packet::ipv4::Ipv4Packet;
+use log::{info, error, warn};
+use hostname;
+use config::{Config, File as ConfigFile, FileFormat};
+use ctrlc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 
 mod fingerprint;
 mod rotating_writer;
@@ -14,67 +21,46 @@ use fingerprint::{Fingerprint, extract_tcp_options, is_syn_packet};
 use rotating_writer::RotatingFileWriter;
 use network_tap::{NetworkTap, pcap_global_header, pcap_packet_header};
 
-struct Config {
+struct AppConfig {
     interface: String,
     fingerprints_dir: String,
     pcap_dir: String,
     max_file_size: u64,
 }
 
-fn read_config() -> Result<Config, Box<dyn std::error::Error>> {
+fn read_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
     let config_paths = [
         PathBuf::from("muonfp.conf"),
         PathBuf::from("/etc/muonfp.conf"),
         env::current_exe()?.with_file_name("muonfp.conf"),
     ];
 
-    let config_content = config_paths.iter()
-        .find_map(|path| {
-            match read_to_string(path) {
-                Ok(content) => {
-                    println!("Using config file: {}", path.display());
-                    Some(content)
-                },
-                Err(_) => None,
-            }
-        })
-        .ok_or("Could not find or read muonfp.conf. Looked in current directory, /etc/, and next to the executable.")?;
+    let mut builder = Config::builder();
 
-    let mut interface = String::new();
-    let mut fingerprints_dir = String::new();
-    let mut pcap_dir = String::new();
-    let mut max_file_size = 100 * 1024 * 1024; // Default to 100MB
-
-    for line in config_content.lines() {
-        let parts: Vec<&str> = line.splitn(2, '=').collect();
-        if parts.len() == 2 {
-            match parts[0].trim() {
-                "interface" => interface = parts[1].trim().to_string(),
-                "fingerprints" => fingerprints_dir = parts[1].trim().to_string(),
-                "pcap" => pcap_dir = parts[1].trim().to_string(),
-                "max_file_size" => max_file_size = parts[1].trim().parse::<u64>()? * 1024 * 1024,
-                _ => eprintln!("Unknown configuration option: {}", parts[0]),
-            }
+    for path in &config_paths {
+        if path.exists() {
+            builder = builder.add_source(ConfigFile::from(path.as_path()).format(FileFormat::Ini));
+            info!("Using config file: {}", path.display());
+            break;
         }
     }
 
-    if interface.is_empty() || fingerprints_dir.is_empty() || pcap_dir.is_empty() {
-        return Err("Missing required configuration options".into());
-    }
+    let settings = builder.build()?;
 
-    Ok(Config {
-        interface,
-        fingerprints_dir,
-        pcap_dir,
-        max_file_size,
+    Ok(AppConfig {
+        interface: settings.get_string("interface")?,
+        fingerprints_dir: settings.get_string("fingerprints")?,
+        pcap_dir: settings.get_string("pcap")?,
+        max_file_size: settings.get_int("max_file_size")? as u64 * 1024 * 1024,
     })
 }
 
 fn main() {
-    println!("MuonFP v.1.1");
+    env_logger::init();
+    info!("MuonFP v.1.2");
 
     if let Err(e) = run() {
-        eprintln!("Error: {}", e);
+        error!("Error: {}", e);
         std::process::exit(1);
     }
 }
@@ -107,16 +93,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let pcap_global_header = pcap_global_header();
     pcap_writer.write_all(&pcap_global_header)?;
 
-    println!("Listening on interface: {}", config.interface);
+    info!("Listening on interface: {}", config.interface);
+
+    // Setup graceful shutdown
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    ctrlc::set_handler(move || {
+        r.store(false, Ordering::SeqCst);
+    })?;
+
+    let hostname = hostname::get()?.to_string_lossy().into_owned();
+
+    let mut pcap_buffer = Vec::new();
+    let flush_interval = Duration::from_secs(60); // Flush every 60 seconds
+    let mut last_flush = std::time::Instant::now();
 
     // Capture and log packets
-    loop {
+    while running.load(Ordering::SeqCst) {
         match network_tap.next_packet() {
             Ok(ethernet) => {
-                // Write packet to pcap file with pcap packet header
+                // Buffer the PCAP packet
                 let pcap_packet_header = pcap_packet_header(ethernet.packet().len() as u32);
-                pcap_writer.write_all(&pcap_packet_header)?;
-                pcap_writer.write_all(ethernet.packet())?;
+                pcap_buffer.extend_from_slice(&pcap_packet_header);
+                pcap_buffer.extend_from_slice(ethernet.packet());
 
                 if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
                     let source_ip = IpAddr::V4(ip_packet.get_source());
@@ -155,17 +154,33 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     window_scale
                                 );
 
-                                // Write JSON line to file
-                                writeln!(fingerprint_writer, "{}", fingerprint.to_json())?;
-                                fingerprint_writer.flush()?;
+                                // Write JSON line to file with hostname
+                                writeln!(fingerprint_writer, "{},{}", hostname, fingerprint.to_json())?;
                             }
                         }
                     }
                 }
+
+                // Check if we need to flush the writers
+                if last_flush.elapsed() >= flush_interval {
+                    fingerprint_writer.flush()?;
+                    pcap_writer.write_all(&pcap_buffer)?;
+                    pcap_writer.flush()?;
+                    pcap_buffer.clear();
+                    last_flush = std::time::Instant::now();
+                }
             }
             Err(e) => {
-                eprintln!("Error: {}", e);
+                warn!("Error capturing packet: {}", e);
             }
         }
     }
+
+    // Graceful shutdown
+    info!("Shutting down...");
+    fingerprint_writer.flush_and_close()?;
+    pcap_writer.write_all(&pcap_buffer)?;
+    pcap_writer.flush_and_close()?;
+
+    Ok(())
 }
