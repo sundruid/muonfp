@@ -4,7 +4,7 @@ MuonFP is a TCP passive fingerprinter written in Rust that has no external depen
 The program will create an network tap on the interface specified and log all pcaps to a rotating file scheme in the directory of your choice. SYN and SYN-ACK packets that can be fingerprinted will be logged in a separate file and directory of your choice.
 
 # Fingerprint Format
-The fingerprint is derived from pseudo-unique setting in the TCP configuration during the SYN and SYN-ACK stages. A fingerprint from these packets will yield the following:
+The fingerprint is derived from pseudo-unique setting in the TCP configuration during the SYN and SYN-ACK stages. A fingerprint from these packets, based on the manufacturer OS and software stack, a relatively unique signature that can be tracked for a number of purposes:
 
 ## **26847:2-4-8-1-3:1460:8**  
 
