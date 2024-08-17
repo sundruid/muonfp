@@ -8,12 +8,11 @@ The fingerprint is generated from the pseudo-unique configurations within the TC
 
 Example:  
 
-## **<ip address>26847:2-4-8-1-3:1460:8**  
+## **26847:2-4-8-1-3:1460:8**  
 
 
 This fingerprint is composed of the following elements extracted from the TCP packet header during the connection negotiation process:  
 
-- TCP v4 Address that was fingerprinted  
 - TCP Window Size  
 - TCP Options as found in the KIND settings that include a number and are kept in strict order as this is quasi unique
 - TCP Maximum Segment Size (MSS) which can provide interesting info including use of VPNs
