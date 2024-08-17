@@ -11,7 +11,7 @@ Example:
 ## **26847:2-4-8-1-3:1460:8**  
 
 
-This is comprised of the following from the TCP packet header provided during connection negotiation:  
+This fingerprint is composed of the following elements extracted from the TCP packet header during the connection negotiation process:  
 
 - TCP v4 Address that was fingerprinted  
 - TCP Window Size  
