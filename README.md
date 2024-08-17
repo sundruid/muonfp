@@ -8,7 +8,7 @@ The fingerprint is generated from the pseudo-unique configurations within the TC
 
 Example:  
 
-## **26847:2-4-8-1-3:1460:8**  
+## **<ip address>26847:2-4-8-1-3:1460:8**  
 
 
 This fingerprint is composed of the following elements extracted from the TCP packet header during the connection negotiation process:  
