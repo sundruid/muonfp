@@ -17,7 +17,7 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 - TCP Options as found in the KIND settings that include a number and are kept in strict order as this is quasi unique
 - TCP Maximum Segment Size (MSS) which can provide interesting info including use of VPNs
 - TCP Window Scale, which is a scaling factor used for TCP Window Size and allows for larger TCP windows
-- 
+  
 
 # v.1.1 Update
 
