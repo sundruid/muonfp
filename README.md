@@ -6,7 +6,8 @@ The program will create an network tap on the interface specified and log all pc
 # Fingerprint Format
 The fingerprint is derived from pseudo-unique setting in the TCP configuration during the SYN and SYN-ACK stages. A fingerprint from these packets will yield the following:
 
-## <center>**26847:2-4-8-1-3:1460:8**</center?
+## <center>**26847:2-4-8-1-3:1460:8**</center>
+<br>
 
 
 This is comprised of the following from the TCP packet header provided during connection negotiation:  
