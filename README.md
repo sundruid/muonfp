@@ -8,6 +8,7 @@ The fingerprint is derived from pseudo-unique setting in the TCP configuration d
 
 ## 26847:2-4-8-1-3:1460:8  
 
+
 This is comprised of the following from the TCP packet header provided during connection negotiation:  
 
 - TCP v4 Address that was fingerprinted  
