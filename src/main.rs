@@ -12,7 +12,6 @@ use ctrlc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-
 mod fingerprint;
 mod rotating_writer;
 mod network_tap;
@@ -82,11 +81,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Create rotating writers
     let mut pcap_writer = RotatingFileWriter::new(
         Path::new(&config.pcap_dir).join("packets"),
-        config.max_file_size
+        config.max_file_size,
+        "pcap"
     )?;
     let mut fingerprint_writer = RotatingFileWriter::new(
         Path::new(&config.fingerprints_dir).join("muonfp"),
-        config.max_file_size
+        config.max_file_size,
+        "out"
     )?;
 
     // Write the PCAP global header
@@ -145,7 +146,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             if is_syn_packet(flags, is_incoming) {
                                 let window_size = u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
                                 let (options_str, mss, window_scale) = extract_tcp_options(tcp_payload);
-                            
+
                                 let fingerprint = Fingerprint::new(
                                     hostname.clone(),
                                     fingerprint_ip,
@@ -154,11 +155,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     mss,
                                     window_scale
                                 );
-                            
+
                                 // Write JSON line to file
                                 writeln!(fingerprint_writer, "{}", fingerprint.to_json())?;
                             }
-                            
                         }
                     }
                 }

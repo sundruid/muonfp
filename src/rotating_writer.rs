@@ -10,10 +10,11 @@ pub struct RotatingFileWriter {
     current_size: u64,
     file_count: u32,
     current_path: Option<PathBuf>,
+    file_extension: String,
 }
 
 impl RotatingFileWriter {
-    pub fn new(base_path: PathBuf, max_size: u64) -> io::Result<Self> {
+    pub fn new(base_path: PathBuf, max_size: u64, file_extension: &str) -> io::Result<Self> {
         let mut writer = RotatingFileWriter {
             base_path,
             max_size,
@@ -21,6 +22,7 @@ impl RotatingFileWriter {
             current_size: 0,
             file_count: 0,
             current_path: None,
+            file_extension: file_extension.to_string(),
         };
         writer.rotate()?;
         Ok(writer)
@@ -31,10 +33,9 @@ impl RotatingFileWriter {
             file.flush()?;
         }
 
-        // Rename the previous file from .part to .out if it exists
         if let Some(current_path) = self.current_path.take() {
             if current_path.exists() {
-                let new_path = current_path.with_extension("out");
+                let new_path = current_path.with_extension(&self.file_extension);
                 std::fs::rename(current_path, new_path)?;
             }
         }
@@ -65,9 +66,10 @@ impl RotatingFileWriter {
         if let Some(mut file) = self.current_file.take() {
             file.flush()?;
         }
+
         if let Some(current_path) = self.current_path.take() {
             if current_path.exists() {
-                let new_path = current_path.with_extension("out");
+                let new_path = current_path.with_extension(&self.file_extension);
                 std::fs::rename(current_path, new_path)?;
             }
         }
