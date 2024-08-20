@@ -57,7 +57,7 @@ fn read_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
 
 fn main() {
     env_logger::init();
-    info!("MuonFP v.1.2");
+    info!("MuonFP v.1.3");
 
     if let Err(e) = run() {
         error!("Error: {}", e);

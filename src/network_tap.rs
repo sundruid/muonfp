@@ -15,19 +15,16 @@ impl NetworkTap {
             .into_iter()
             .find(|iface| iface.name == interface_name)
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Network interface {} not found", interface_name)))?;
-
         let local_ips: HashSet<IpAddr> = interface
             .ips
             .iter()
             .map(|ip_network| ip_network.ip())
             .collect();
-
         let (_, rx) = match datalink::channel(&interface, Default::default()) {
             Ok(Ethernet(tx, rx)) => (tx, rx),
             Ok(_) => return Err(io::Error::new(io::ErrorKind::Other, "Unhandled channel type")),
             Err(e) => return Err(io::Error::new(io::ErrorKind::Other, format!("Error creating datalink channel: {}", e))),
         };
-
         Ok(NetworkTap { rx, local_ips })
     }
 
@@ -55,24 +52,24 @@ pub fn pcap_packet_header(packet_length: u32) -> [u8; 16] {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Time went backwards");
     let secs = timestamp.as_secs() as u32;
-    let usecs = timestamp.subsec_micros() as u32;
+    let usecs = timestamp.subsec_micros();
 
     [
-        (secs & 0xff) as u8,
-        ((secs >> 8) & 0xff) as u8,
-        ((secs >> 16) & 0xff) as u8,
-        ((secs >> 24) & 0xff) as u8,
-        (usecs & 0xff) as u8,
-        ((usecs >> 8) & 0xff) as u8,
-        ((usecs >> 16) & 0xff) as u8,
-        ((usecs >> 24) & 0xff) as u8,
-        (packet_length & 0xff) as u8,
-        ((packet_length >> 8) & 0xff) as u8,
-        ((packet_length >> 16) & 0xff) as u8,
-        ((packet_length >> 24) & 0xff) as u8,
-        (packet_length & 0xff) as u8,
-        ((packet_length >> 8) & 0xff) as u8,
-        ((packet_length >> 16) & 0xff) as u8,
-        ((packet_length >> 24) & 0xff) as u8,
+        (secs >> 24) as u8,
+        (secs >> 16) as u8,
+        (secs >> 8) as u8,
+        secs as u8,
+        (usecs >> 24) as u8,
+        (usecs >> 16) as u8,
+        (usecs >> 8) as u8,
+        usecs as u8,
+        (packet_length >> 24) as u8,
+        (packet_length >> 16) as u8,
+        (packet_length >> 8) as u8,
+        packet_length as u8,
+        (packet_length >> 24) as u8,
+        (packet_length >> 16) as u8,
+        (packet_length >> 8) as u8,
+        packet_length as u8,
     ]
 }
