@@ -79,20 +79,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let local_ips = network_tap.local_ips.clone();
 
     // Create rotating writers
+    let pcap_global_header = pcap_global_header();
     let mut pcap_writer = RotatingFileWriter::new(
         Path::new(&config.pcap_dir).join("packets"),
         config.max_file_size,
-        "pcap"
+        "pcap",
+        move |file| file.write_all(&pcap_global_header)
     )?;
     let mut fingerprint_writer = RotatingFileWriter::new(
         Path::new(&config.fingerprints_dir).join("muonfp"),
         config.max_file_size,
-        "out"
+        "out",
+        |_| Ok(())
     )?;
-
-    // Write the PCAP global header
-    let pcap_global_header = pcap_global_header();
-    pcap_writer.write_packet(&pcap_global_header)?;
 
     info!("Listening on interface: {}", config.interface);
 
@@ -113,11 +112,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         match network_tap.next_packet() {
             Ok(ethernet) => {
                 let packet_header = pcap_packet_header(ethernet.packet().len() as u32);
-                let mut packet_data = Vec::with_capacity(packet_header.len() + ethernet.packet().len());
-                packet_data.extend_from_slice(&packet_header);
-                packet_data.extend_from_slice(ethernet.packet());
-                
-                pcap_writer.write_packet(&packet_data)?;
+                let mut full_packet = Vec::with_capacity(packet_header.len() + ethernet.packet().len());
+                full_packet.extend_from_slice(&packet_header);
+                full_packet.extend_from_slice(ethernet.packet());
+                pcap_writer.write_packet(&full_packet)?;
 
                 if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
                     let source_ip = IpAddr::V4(ip_packet.get_source());

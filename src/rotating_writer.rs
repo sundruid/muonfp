@@ -11,10 +11,14 @@ pub struct RotatingFileWriter {
     file_count: u32,
     current_path: Option<PathBuf>,
     file_extension: String,
+    init_new_file: Box<dyn Fn(&mut BufWriter<File>) -> io::Result<()>>,
 }
 
 impl RotatingFileWriter {
-    pub fn new(base_path: PathBuf, max_size: u64, file_extension: &str) -> io::Result<Self> {
+    pub fn new<F>(base_path: PathBuf, max_size: u64, file_extension: &str, init_new_file: F) -> io::Result<Self>
+    where
+        F: Fn(&mut BufWriter<File>) -> io::Result<()> + 'static,
+    {
         let mut writer = RotatingFileWriter {
             base_path,
             max_size,
@@ -23,6 +27,7 @@ impl RotatingFileWriter {
             file_count: 0,
             current_path: None,
             file_extension: file_extension.to_string(),
+            init_new_file: Box::new(init_new_file),
         };
         writer.rotate()?;
         Ok(writer)
@@ -53,22 +58,24 @@ impl RotatingFileWriter {
             .write(true)
             .create(true)
             .open(&new_path)?;
-        self.current_file = Some(BufWriter::new(file));
+        let mut buf_writer = BufWriter::new(file);
+        (self.init_new_file)(&mut buf_writer)?;
+        buf_writer.flush()?;
+        self.current_file = Some(buf_writer);
         self.current_path = Some(new_path);
         self.current_size = 0;
         self.file_count += 1;
         Ok(())
     }
 
-    pub fn write_packet(&mut self, buf: &[u8]) -> io::Result<()> {
+    pub fn write_packet(&mut self, packet: &[u8]) -> io::Result<()> {
+        let packet_size = packet.len() as u64;
+        if self.current_size + packet_size > self.max_size {
+            self.rotate()?;
+        }
         if let Some(file) = self.current_file.as_mut() {
-            file.write_all(buf)?;
-            file.flush()?;
-            self.current_size += buf.len() as u64;
-            
-            if self.current_size >= self.max_size {
-                self.rotate()?;
-            }
+            file.write_all(packet)?;
+            self.current_size += packet_size;
             Ok(())
         } else {
             Err(io::Error::new(io::ErrorKind::Other, "No file currently open"))
