@@ -32,14 +32,12 @@ impl RotatingFileWriter {
         if let Some(mut file) = self.current_file.take() {
             file.flush()?;
         }
-
         if let Some(current_path) = self.current_path.take() {
             if current_path.exists() {
                 let new_path = current_path.with_extension(&self.file_extension);
                 std::fs::rename(current_path, new_path)?;
             }
         }
-
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Time went backwards")
@@ -62,11 +60,25 @@ impl RotatingFileWriter {
         Ok(())
     }
 
+    pub fn write_packet(&mut self, buf: &[u8]) -> io::Result<()> {
+        if let Some(file) = self.current_file.as_mut() {
+            file.write_all(buf)?;
+            file.flush()?;
+            self.current_size += buf.len() as u64;
+            
+            if self.current_size >= self.max_size {
+                self.rotate()?;
+            }
+            Ok(())
+        } else {
+            Err(io::Error::new(io::ErrorKind::Other, "No file currently open"))
+        }
+    }
+
     pub fn flush_and_close(&mut self) -> io::Result<()> {
         if let Some(mut file) = self.current_file.take() {
             file.flush()?;
         }
-
         if let Some(current_path) = self.current_path.take() {
             if current_path.exists() {
                 let new_path = current_path.with_extension(&self.file_extension);
@@ -79,16 +91,8 @@ impl RotatingFileWriter {
 
 impl Write for RotatingFileWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.current_size + buf.len() as u64 > self.max_size {
-            self.rotate()?;
-        }
-        if let Some(file) = self.current_file.as_mut() {
-            let bytes_written = file.write(buf)?;
-            self.current_size += bytes_written as u64;
-            Ok(bytes_written)
-        } else {
-            Err(io::Error::new(io::ErrorKind::Other, "No file currently open"))
-        }
+        self.write_packet(buf)?;
+        Ok(buf.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {

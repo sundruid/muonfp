@@ -52,24 +52,23 @@ pub fn pcap_packet_header(packet_length: u32) -> [u8; 16] {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Time went backwards");
     let secs = timestamp.as_secs() as u32;
-    let usecs = timestamp.subsec_micros();
-
+    let usecs = timestamp.subsec_micros() as u32;
     [
-        (secs >> 24) as u8,
-        (secs >> 16) as u8,
-        (secs >> 8) as u8,
-        secs as u8,
-        (usecs >> 24) as u8,
-        (usecs >> 16) as u8,
-        (usecs >> 8) as u8,
-        usecs as u8,
-        (packet_length >> 24) as u8,
-        (packet_length >> 16) as u8,
-        (packet_length >> 8) as u8,
-        packet_length as u8,
-        (packet_length >> 24) as u8,
-        (packet_length >> 16) as u8,
-        (packet_length >> 8) as u8,
-        packet_length as u8,
+        (secs & 0xff) as u8,
+        ((secs >> 8) & 0xff) as u8,
+        ((secs >> 16) & 0xff) as u8,
+        ((secs >> 24) & 0xff) as u8,
+        (usecs & 0xff) as u8,
+        ((usecs >> 8) & 0xff) as u8,
+        ((usecs >> 16) & 0xff) as u8,
+        ((usecs >> 24) & 0xff) as u8,
+        (packet_length & 0xff) as u8,
+        ((packet_length >> 8) & 0xff) as u8,
+        ((packet_length >> 16) & 0xff) as u8,
+        ((packet_length >> 24) & 0xff) as u8,
+        (packet_length & 0xff) as u8,
+        ((packet_length >> 8) & 0xff) as u8,
+        ((packet_length >> 16) & 0xff) as u8,
+        ((packet_length >> 24) & 0xff) as u8,
     ]
 }
