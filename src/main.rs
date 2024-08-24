@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -5,27 +6,33 @@ use std::env;
 use std::time::Duration;
 use pnet::packet::Packet;
 use pnet::packet::ipv4::Ipv4Packet;
-use log::{info, error, warn};
+use log::{info, error, warn, debug, LevelFilter};
 use hostname;
-use config::{Config, File as ConfigFile, FileFormat};
 use ctrlc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::collections::{HashSet, HashMap};
+use env_logger::{Builder, Target};
 
 mod fingerprint;
 mod rotating_writer;
 mod network_tap;
+mod ipblocker;
 
 use fingerprint::{Fingerprint, extract_tcp_options, is_syn_packet};
 use rotating_writer::RotatingFileWriter;
 use network_tap::{NetworkTap, pcap_global_header, pcap_packet_header};
+use ipblocker::IPBlocker;
 
 struct AppConfig {
     interface: String,
     fingerprints_dir: String,
     pcap_dir: String,
     max_file_size: u64,
+    blocked_fingerprints: HashSet<String>,
+    fpfw_logfile: String,
 }
+
 
 fn read_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
     let config_paths = [
@@ -33,41 +40,66 @@ fn read_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
         PathBuf::from("/etc/muonfp.conf"),
         env::current_exe()?.with_file_name("muonfp.conf"),
     ];
-
-    let mut builder = Config::builder();
-
+    let mut builder = config::Config::builder();
     for path in &config_paths {
         if path.exists() {
-            builder = builder.add_source(ConfigFile::from(path.as_path()).format(FileFormat::Ini));
+            builder = builder.add_source(config::File::from(path.as_path()).format(config::FileFormat::Ini));
             info!("Using config file: {}", path.display());
             break;
         }
     }
-
     let settings = builder.build()?;
 
+    // Debug: Print all keys in the configuration
+    debug!("Configuration contents:");
+    if let Ok(config_map) = settings.get::<HashMap<String, config::Value>>("") {
+        for (key, value) in config_map.iter() {
+            debug!(" {}: {:?}", key, value);
+        }
+    } else {
+        warn!("Failed to get configuration for debugging");
+    }
+
+    let mut blocked_fingerprints = HashSet::new();
+    if let Ok(block) = settings.get::<Vec<String>>("block") {
+        for fp in block {
+            blocked_fingerprints.insert(fp.clone());
+            debug!("Loaded blocked fingerprint: {}", fp);
+        }
+    } else {
+        warn!("No 'block' section found in the configuration or it's empty.");
+    }
+    debug!("Total blocked fingerprints loaded: {}", blocked_fingerprints.len());
+
     Ok(AppConfig {
-        interface: settings.get_string("interface")?,
-        fingerprints_dir: settings.get_string("fingerprints")?,
-        pcap_dir: settings.get_string("pcap")?,
-        max_file_size: settings.get_int("max_file_size")? as u64 * 1024 * 1024,
+        interface: settings.get::<String>("network.interface")?,
+        fingerprints_dir: settings.get::<String>("fingerprints.fingerprints_dir")?,
+        pcap_dir: settings.get::<String>("network.pcap")?,
+        max_file_size: settings.get::<i64>("pcap.max_file_size")? as u64 * 1024 * 1024,
+        blocked_fingerprints,
+        fpfw_logfile: settings.get::<String>("logging.fpfw_logfile")?,
     })
 }
 
 fn main() {
-    env_logger::init();
+    let config = read_config().expect("Failed to read configuration");
+
+    let log_file = File::create(&config.fpfw_logfile).expect("Could not create log file");
+
+    Builder::new()
+        .target(Target::Pipe(Box::new(log_file)))
+        .filter(None, LevelFilter::Debug)
+        .init();
+
     info!("MuonFP v.1.3");
 
-    if let Err(e) = run() {
+    if let Err(e) = run(config) {
         error!("Error: {}", e);
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let config = read_config()?;
-
-    // Validate directories
+fn run(config: AppConfig) -> Result<(), Box<dyn std::error::Error>> {
     if !Path::new(&config.fingerprints_dir).is_dir() {
         return Err(format!("Fingerprints directory does not exist: {}", config.fingerprints_dir).into());
     }
@@ -78,7 +110,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut network_tap = NetworkTap::new(&config.interface)?;
     let local_ips = network_tap.local_ips.clone();
 
-    // Create rotating writers
     let pcap_global_header = pcap_global_header();
     let mut pcap_writer = RotatingFileWriter::new(
         Path::new(&config.pcap_dir).join("packets"),
@@ -86,6 +117,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "pcap",
         move |file| file.write_all(&pcap_global_header)
     )?;
+    
     let mut fingerprint_writer = RotatingFileWriter::new(
         Path::new(&config.fingerprints_dir).join("muonfp"),
         config.max_file_size,
@@ -95,7 +127,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("Listening on interface: {}", config.interface);
 
-    // Setup graceful shutdown
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
     ctrlc::set_handler(move || {
@@ -104,10 +135,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let hostname = hostname::get()?.to_string_lossy().into_owned();
 
-    let flush_interval = Duration::from_secs(60); // Flush every 60 seconds
+    let flush_interval = Duration::from_secs(60);
     let mut last_flush = std::time::Instant::now();
 
-    // Capture and log packets
     while running.load(Ordering::SeqCst) {
         match network_tap.next_packet() {
             Ok(ethernet) => {
@@ -121,7 +151,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let source_ip = IpAddr::V4(ip_packet.get_source());
                     let destination_ip = IpAddr::V4(ip_packet.get_destination());
 
-                    // Process packets in both directions
                     let (fingerprint_ip, is_incoming) = if local_ips.contains(&destination_ip) {
                         (source_ip, true) // Incoming connection
                     } else if local_ips.contains(&source_ip) {
@@ -130,7 +159,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         continue; // Neither source nor destination is local, skip
                     };
 
-                    // Skip broadcast, multicast, or unspecified IPs
                     if let IpAddr::V4(ip) = fingerprint_ip {
                         if ip.is_broadcast() || ip.is_multicast() || ip.is_unspecified() {
                             continue;
@@ -155,17 +183,28 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     window_scale
                                 );
 
-                                // Write JSON line to file
                                 writeln!(fingerprint_writer, "{}", fingerprint.to_json())?;
+
+                                debug!("Checking fingerprint: {}", fingerprint.muonfp_fingerprint);
+                                debug!("Blocked fingerprints: {:?}", config.blocked_fingerprints);
+
+                                if config.blocked_fingerprints.contains(&fingerprint.muonfp_fingerprint) {
+                                    info!("Blocked fingerprint detected: {} from IP: {}", 
+                                          fingerprint.muonfp_fingerprint, fingerprint.ip_address);
+                                    IPBlocker::block_ip(fingerprint.ip_address.to_string());
+                                } else {
+                                    debug!("Fingerprint not blocked: {}", fingerprint.muonfp_fingerprint);
+                                    debug!("Blocked list does not contain this fingerprint");
+                                }
                             }
                         }
                     }
                 }
 
-                // Check if we need to flush the writers
                 if last_flush.elapsed() >= flush_interval {
                     fingerprint_writer.flush()?;
                     pcap_writer.flush()?;
+                    debug!("Current blocked fingerprints: {:?}", config.blocked_fingerprints);
                     last_flush = std::time::Instant::now();
                 }
             }
@@ -175,7 +214,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Graceful shutdown
     info!("Shutting down...");
     fingerprint_writer.flush_and_close()?;
     pcap_writer.flush_and_close()?;
