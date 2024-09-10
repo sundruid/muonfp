@@ -30,8 +30,7 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 
       mkdir muonfp  
       cd muonfp   
-      curl -O -L https://github.com/sundruid/muonfp/releases/download/DebianV.1.1/muonfp_deb_v_1_1.tar.gz 
-      tar -xvf muonfp_deb_v_1_1.tar.gz  
+      curl -O -L https://github.com/sundruid/muonfp/releases/download/0.1.3_beta/muonfp_0_1_3   
    
 vi muonfp_deb_v_1_1
 
@@ -42,7 +41,8 @@ vi muonfp_deb_v_1_1
 
 Esc, :, x, Enter. 
 
-    sudo ./muonfp_deb_v_0_1_3 &       # & on the end will put it into the background. 
+    sudo chmod 755 ./muonfp_0_1_3   # do the necessary
+    sudo ./muonfp_0_1_3 &           # & on the end will put it into the background. 
                                     # Logging out will kill process. 
                                     # Execute with nohup to keep alive. -> nohup sudo ./muonfp_deb_v_1_1 &
                                           # to retrieve:
