@@ -32,7 +32,7 @@ This fingerprint is composed of the following elements extracted from the TCP pa
       cd muonfp   
       curl -O -L https://github.com/sundruid/muonfp/releases/download/0.1.3_beta/muonfp_0_1_3   
    
-vi muonfp_deb_v_1_1
+vi muonfp.conf
 
     interface=en0      # do an 'ip addr show' to find interface name
     fingerprints=.     # your directory of choice
