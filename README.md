@@ -50,4 +50,6 @@ Esc, :, x, Enter.
                                           # fg <job #>
 
 
+Interested in a Firewall for fingerprinting? Checkout sundruid/fpfw that will automatically block based on fingerprint using nftables.
+
 sundruid@protonmail.com
