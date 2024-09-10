@@ -19,7 +19,7 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 - TCP Window Scale, which is a scaling factor used for TCP Window Size and allows for larger TCP windows
   
 
-# v.1.1 Update
+# 0.1.3 Update
 
 - Uses muonfp.conf to provide configurable file paths for logging with filesize limits
 - Rotating logging
