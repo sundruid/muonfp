@@ -42,7 +42,7 @@ vi muonfp_deb_v_1_1
 
 Esc, :, x, Enter. 
 
-    sudo ./muonfp_deb_v_1_1 &       # & on the end will put it into the background. 
+    sudo ./muonfp_deb_v_0_1_3 &       # & on the end will put it into the background. 
                                     # Logging out will kill process. 
                                     # Execute with nohup to keep alive. -> nohup sudo ./muonfp_deb_v_1_1 &
                                           # to retrieve:
