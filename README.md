@@ -30,24 +30,18 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 
       mkdir muonfp  
       cd muonfp   
-      curl -O -L https://github.com/sundruid/muonfp/releases/download/0.1.3_beta/muonfp_0_1_3   
+      curl -O -L https://github.com/sundruid/muonfp/releases/download/0.1.3/muonfp013.tar.gz
+      mkdir muonfp/
+      tar -xvf muonfp013.tar.gz
+      sudo ./install.sh
    
-vi muonfp.conf
+muonfp.conf
 
-    interface=en0      # do an 'ip addr show' to find interface name
-    fingerprints=.     # your directory of choice
-    pcap=.             # your directory of choice, you can set to /dev/null if you do not want pcaps
-    max_file_size=10   # max file size before log rotation occurs in MB
+    interface=en0                          # do an 'ip addr show' to find interface name
+    fingerprints=/var/log/fingerprints     # your directory of choice
+    pcap=/var/log/pcaps                    # your directory of choice, you can set to /dev/null if you do not want pcaps
+    max_file_size=10                       # max file size before log rotation occurs in MB
 
-Esc, :, x, Enter. 
-
-    sudo chmod 755 ./muonfp_0_1_3   # do the necessary
-    sudo ./muonfp_0_1_3 &           # & on the end will put it into the background. 
-                                    # Logging out will kill process. 
-                                    # Execute with nohup to keep alive. -> nohup sudo ./muonfp_deb_v_1_1 &
-                                          # to retrieve:
-                                          # jobs
-                                          # fg <job #>
 
 
 Interested in a Firewall for fingerprinting? Checkout sundruid/fpfw that will automatically block based on fingerprint using nftables.
