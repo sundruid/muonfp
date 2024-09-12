@@ -33,7 +33,6 @@ This fingerprint is composed of the following elements extracted from the TCP pa
       mkdir muonfp  
       cd muonfp   
       curl -O -L https://github.com/sundruid/muonfp/releases/download/0.1.3/muonfp013.tar.gz
-      mkdir muonfp/
       tar -xvf muonfp013.tar.gz
       sudo ./install.sh
    
