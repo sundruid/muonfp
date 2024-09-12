@@ -34,6 +34,11 @@ chmod 755 /usr/local/bin/muonfp
 
 echo "muonfp has been moved to /usr/local/bin/ with correct permissions"
 
+mkdir /var/log/pcaps
+mkdir /var/log/fingerprints
+
+echo "pcaps and fingerprints directories created in /var/log"
+
 # Create the service file
 cat << EOF > /etc/systemd/system/muonfp.service
 [Unit]
