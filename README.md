@@ -35,13 +35,28 @@ This fingerprint is composed of the following elements extracted from the TCP pa
       tar -xvf muonfp013.tar.gz
       sudo ./install.sh
    
-muonfp.conf
+/etc/muonfp.conf
 
     interface=en0                          # do an 'ip addr show' to find interface name
     fingerprints=/var/log/fingerprints     # your directory of choice
     pcap=/var/log/pcaps                    # your directory of choice, you can set to /dev/null if you do not want pcaps
     max_file_size=10                       # max file size before log rotation occurs in MB
 
+If you do not want to install as a service, do NOT run the install.sh script and instead adjust the .conf file with the locations you want to store data and execute at the CLI.
+
+# Compile instructions
+
+    Install Rust via their instructions:
+    https://www.rust-lang.org/tools/install
+    
+    Clone the repo: 
+    git clone https://github.com/sundruid/muonfp.git
+
+    cd into the directory and execute:
+    cargo build --release
+
+    Your binary will be target/release/muonfp
+    
 
 
 Interested in a Firewall for fingerprinting? Checkout sundruid/fpfw that will automatically block based on fingerprint using nftables.
