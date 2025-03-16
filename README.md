@@ -6,12 +6,12 @@ MuonFP is an open-source tool designed for TCP fingerprinting, enabling the iden
 This tool is part of a broader effort to enhance network security by focusing on the TCP layer (Layer 4) of the OSI model, providing a complementary approach to traditional IP-based blocking methods. MuonFP can be integrated with other security tools, such as firewalls, to block traffic based on identified fingerprints, adding an additional layer of defense against malicious activities.
 
 # Features:  
-TCP Fingerprint Generation: Generates unique fingerprints based on TCP packet attributes, such as TCP options, window sizes, and sequence numbers.  
-Reconnaissance Detection: Identifies patterns indicative of scanning activities, including those from fast scanners targeting large IP ranges.  
-Integration with Firewalls: Compatible with tools like Fingerprint Firewall (fpfw) for blocking traffic based on MuonFP fingerprints.  
-Legacy Data Support: Allows conversion of legacy TCP fingerprint data (e.g., p0f signatures) into MuonFP-compatible formats for enhanced detection capabilities.  
-Customizable Fingerprint Blocking: Supports wildcard matching for blocking specific fingerprint patterns, enhancing flexibility in security configurations.  
-Cross-Platform Compatibility: Designed to run on various operating systems, including Linux, macOS, and Windows, under the GPL license.  
+- TCP Fingerprint Generation: Generates unique fingerprints based on TCP packet attributes, such as TCP options, window sizes, and sequence numbers.  
+- Reconnaissance Detection: Identifies patterns indicative of scanning activities, including those from fast scanners targeting large IP ranges.  
+- Integration with Firewalls: Compatible with tools like Fingerprint Firewall (fpfw) for blocking traffic based on MuonFP fingerprints.  
+- Legacy Data Support: Allows conversion of legacy TCP fingerprint data (e.g., p0f signatures) into MuonFP-compatible formats for enhanced detection capabilities.  
+- Customizable Fingerprint Blocking: Supports wildcard matching for blocking specific fingerprint patterns, enhancing flexibility in security configurations.  
+- Cross-Platform Compatibility: Designed to run on various operating systems, including Linux, macOS, and Windows, under the GPL license.  
 
 # Fingerprint Format
 The fingerprint is generated from the pseudo-unique configurations within the TCP settings, specifically during the SYN and SYN-ACK handshake stages. This fingerprint, shaped by the underlying operating system and software stack of the manufacturer, creates a distinct signature that can be traced and analyzed for various purposes. These purposes may include network security, device identification, and traffic monitoring, offering a relatively unique identifier that can be used to profile and track devices across different networks.  
