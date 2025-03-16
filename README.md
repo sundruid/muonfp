@@ -5,6 +5,8 @@ MuonFP is an open-source tool designed for TCP fingerprinting, enabling the iden
 
 This tool is part of a broader effort to enhance network security by focusing on the TCP layer (Layer 4) of the OSI model, providing a complementary approach to traditional IP-based blocking methods. MuonFP can be integrated with other security tools, such as firewalls, to block traffic based on identified fingerprints, adding an additional layer of defense against malicious activities.
 
+Read the Whitepaper: [https://[
+](https://www.kenwebster.com/index.php/2025/01/29/there-is-no-such-thing-as-a-benign-internet-scanner/)](https://www.kenwebster.com/index.php/2025/01/29/there-is-no-such-thing-as-a-benign-internet-scanner/)  
 # Features:  
 - TCP Fingerprint Generation: Generates unique fingerprints based on TCP packet attributes, such as TCP options, window sizes, and sequence numbers.  
 - Reconnaissance Detection: Identifies patterns indicative of scanning activities, including those from fast scanners targeting large IP ranges.  
@@ -27,7 +29,6 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 - TCP Options as found in the KIND settings that include a number and are kept in strict order as this is quasi unique
 - TCP Maximum Segment Size (MSS) which can provide interesting info including use of VPNs
 - TCP Window Scale, which is a scaling factor used for TCP Window Size and allows for larger TCP windows
-  
 
 # 0.1.3 Update
 
