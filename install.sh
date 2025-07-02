@@ -2,6 +2,40 @@
 
 # This script sets up the muonfp service and handles file operations
 
+# Check for uninstall flag
+if [ "$1" = "-uninstall" ]; then
+    echo "Uninstalling muonfp..."
+    
+    # Stop and disable the service first
+    systemctl stop muonfp.service 2>/dev/null
+    systemctl disable muonfp.service 2>/dev/null
+    
+    # Remove the service file
+    rm -f /etc/systemd/system/muonfp.service
+    
+    # Reload systemd to recognize the removed service
+    systemctl daemon-reload
+    
+    # Remove the configuration file
+    rm -f /etc/muonfp.conf
+    
+    # Remove the executable
+    rm -f /usr/local/bin/muonfp
+    
+    # Remove log directories and all contents
+    rm -rf /var/log/pcaps
+    rm -rf /var/log/fingerprints
+    
+    echo "muonfp has been uninstalled successfully."
+    echo "Removed:"
+    echo "  - /etc/systemd/system/muonfp.service"
+    echo "  - /etc/muonfp.conf"
+    echo "  - /usr/local/bin/muonfp"
+    echo "  - /var/log/pcaps (and all contents)"
+    echo "  - /var/log/fingerprints (and all contents)"
+    exit 0
+fi
+
 # Check if script is run as root
 if [ "$EUID" -ne 0 ]
   then echo "Please run as root"
