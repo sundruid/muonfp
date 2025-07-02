@@ -41,13 +41,13 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 
       mkdir muonfp  
       cd muonfp   
-      curl -O -L https://github.com/sundruid/muonfp/releases/download/0.1.3/muonfp013.tar.gz
-      tar -xvf muonfp013.tar.gz
+      curl -O -L https://github.com/sundruid/muonfp/releases/download/v0.1.4_DEB/muonfp_deb_v_1_4.tar.gz
+      tar -xvf muonfp_deb_v_1_4.tar.gz
       sudo ./install.sh
    
 /etc/muonfp.conf
 
-    interface=en0                          # do an 'ip addr show' to find interface name
+    interface=eth0                         # do an 'ip addr show' to find interface name
     fingerprints=/var/log/fingerprints     # your directory of choice
     pcap=/var/log/pcaps                    # your directory of choice, you can set to /dev/null if you do not want pcaps
     max_file_size=10                       # max file size before log rotation occurs in MB
