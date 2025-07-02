@@ -71,7 +71,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if !Path::new(&config.fingerprints_dir).is_dir() {
         return Err(format!("Fingerprints directory does not exist: {}", config.fingerprints_dir).into());
     }
-    if !Path::new(&config.pcap_dir).is_dir() {
+    
+    // Special handling for /dev/null - skip PCAP writing entirely
+    let skip_pcap = config.pcap_dir == "/dev/null";
+    if !skip_pcap && !Path::new(&config.pcap_dir).is_dir() {
         return Err(format!("PCAP directory does not exist: {}", config.pcap_dir).into());
     }
 
@@ -80,12 +83,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create rotating writers
     let pcap_global_header = pcap_global_header();
-    let mut pcap_writer = RotatingFileWriter::new(
-        Path::new(&config.pcap_dir).join("packets"),
-        config.max_file_size,
-        "pcap",
-        move |file| file.write_all(&pcap_global_header)
-    )?;
+    let mut pcap_writer = if skip_pcap {
+        None
+    } else {
+        Some(RotatingFileWriter::new(
+            Path::new(&config.pcap_dir).join("packets"),
+            config.max_file_size,
+            "pcap",
+            move |file| file.write_all(&pcap_global_header)
+        )?)
+    };
     let mut fingerprint_writer = RotatingFileWriter::new(
         Path::new(&config.fingerprints_dir).join("muonfp"),
         config.max_file_size,
@@ -115,7 +122,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let mut full_packet = Vec::with_capacity(packet_header.len() + ethernet.packet().len());
                 full_packet.extend_from_slice(&packet_header);
                 full_packet.extend_from_slice(ethernet.packet());
-                pcap_writer.write_packet(&full_packet)?;
+                
+                // Only write PCAP if not skipping
+                if let Some(ref mut writer) = pcap_writer {
+                    writer.write_packet(&full_packet)?;
+                }
 
                 if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
                     let source_ip = IpAddr::V4(ip_packet.get_source());
@@ -165,7 +176,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // Check if we need to flush the writers
                 if last_flush.elapsed() >= flush_interval {
                     fingerprint_writer.flush()?;
-                    pcap_writer.flush()?;
+                    if let Some(ref mut writer) = pcap_writer {
+                        writer.flush()?;
+                    }
                     last_flush = std::time::Instant::now();
                 }
             }
@@ -178,7 +191,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Graceful shutdown
     info!("Shutting down...");
     fingerprint_writer.flush_and_close()?;
-    pcap_writer.flush_and_close()?;
+    if let Some(mut writer) = pcap_writer {
+        writer.flush_and_close()?;
+    }
 
     Ok(())
 }
