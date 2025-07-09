@@ -32,7 +32,7 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 
 # 0.1.4 Update
 
-- Fixed how /dev/null handles pcap log writing
+- Fixed how specifying /dev/null in the muonfp.conf pcap path is handled by the log writer
 - Added a -uninstall to the install.sh script
   
 # 0.1.3 Update
