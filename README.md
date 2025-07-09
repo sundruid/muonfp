@@ -30,6 +30,11 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 - TCP Maximum Segment Size (MSS) which can provide interesting info including use of VPNs
 - TCP Window Scale, which is a scaling factor used for TCP Window Size and allows for larger TCP windows
 
+# 0.1.4 Update
+
+- Fixed how /dev/null handles pcap log writing
+- Added a -uninstall to the install.sh script
+  
 # 0.1.3 Update
 
 - Uses muonfp.conf to provide configurable file paths for logging with filesize limits
