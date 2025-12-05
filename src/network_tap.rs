@@ -1,8 +1,8 @@
 use pnet::datalink::{self, Channel::Ethernet};
 use pnet::packet::ethernet::EthernetPacket;
+use std::collections::HashSet;
 use std::io;
 use std::net::IpAddr;
-use std::collections::HashSet;
 
 pub struct NetworkTap {
     rx: Box<dyn datalink::DataLinkReceiver>,
@@ -14,7 +14,12 @@ impl NetworkTap {
         let interface = datalink::interfaces()
             .into_iter()
             .find(|iface| iface.name == interface_name)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Network interface {} not found", interface_name)))?;
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Network interface {} not found", interface_name),
+                )
+            })?;
         let local_ips: HashSet<IpAddr> = interface
             .ips
             .iter()
@@ -22,8 +27,18 @@ impl NetworkTap {
             .collect();
         let (_, rx) = match datalink::channel(&interface, Default::default()) {
             Ok(Ethernet(tx, rx)) => (tx, rx),
-            Ok(_) => return Err(io::Error::new(io::ErrorKind::Other, "Unhandled channel type")),
-            Err(e) => return Err(io::Error::new(io::ErrorKind::Other, format!("Error creating datalink channel: {}", e))),
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Unhandled channel type",
+                ))
+            }
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Error creating datalink channel: {}", e),
+                ))
+            }
         };
         Ok(NetworkTap { rx, local_ips })
     }
@@ -31,7 +46,10 @@ impl NetworkTap {
     pub fn next_packet(&mut self) -> io::Result<EthernetPacket> {
         match self.rx.next() {
             Ok(packet) => Ok(EthernetPacket::new(packet).unwrap()),
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, format!("Failed to read packet: {}", e))),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("Failed to read packet: {}", e),
+            )),
         }
     }
 }

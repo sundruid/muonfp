@@ -1,24 +1,24 @@
+use config::{Config, File as ConfigFile, FileFormat};
+use ctrlc;
+use hostname;
+use log::{error, info, warn};
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::Packet;
+use std::env;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::env;
-use std::time::Duration;
-use pnet::packet::Packet;
-use pnet::packet::ipv4::Ipv4Packet;
-use log::{info, error, warn};
-use hostname;
-use config::{Config, File as ConfigFile, FileFormat};
-use ctrlc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 mod fingerprint;
-mod rotating_writer;
 mod network_tap;
+mod rotating_writer;
 
-use fingerprint::{Fingerprint, extract_tcp_options, is_syn_packet};
+use fingerprint::{extract_tcp_options, is_syn_packet, Fingerprint};
+use network_tap::{pcap_global_header, pcap_packet_header, NetworkTap};
 use rotating_writer::RotatingFileWriter;
-use network_tap::{NetworkTap, pcap_global_header, pcap_packet_header};
 
 struct AppConfig {
     interface: String,
@@ -69,9 +69,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Validate directories
     if !Path::new(&config.fingerprints_dir).is_dir() {
-        return Err(format!("Fingerprints directory does not exist: {}", config.fingerprints_dir).into());
+        return Err(format!(
+            "Fingerprints directory does not exist: {}",
+            config.fingerprints_dir
+        )
+        .into());
     }
-    
+
     // Special handling for /dev/null - skip PCAP writing entirely
     let skip_pcap = config.pcap_dir == "/dev/null";
     if !skip_pcap && !Path::new(&config.pcap_dir).is_dir() {
@@ -90,14 +94,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Path::new(&config.pcap_dir).join("packets"),
             config.max_file_size,
             "pcap",
-            move |file| file.write_all(&pcap_global_header)
+            move |file| file.write_all(&pcap_global_header),
         )?)
     };
     let mut fingerprint_writer = RotatingFileWriter::new(
         Path::new(&config.fingerprints_dir).join("muonfp"),
         config.max_file_size,
         "out",
-        |_| Ok(())
+        |_| Ok(()),
     )?;
 
     info!("Listening on interface: {}", config.interface);
@@ -119,10 +123,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         match network_tap.next_packet() {
             Ok(ethernet) => {
                 let packet_header = pcap_packet_header(ethernet.packet().len() as u32);
-                let mut full_packet = Vec::with_capacity(packet_header.len() + ethernet.packet().len());
+                let mut full_packet =
+                    Vec::with_capacity(packet_header.len() + ethernet.packet().len());
                 full_packet.extend_from_slice(&packet_header);
                 full_packet.extend_from_slice(ethernet.packet());
-                
+
                 // Only write PCAP if not skipping
                 if let Some(ref mut writer) = pcap_writer {
                     writer.write_packet(&full_packet)?;
@@ -148,14 +153,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
-                    if ip_packet.get_next_level_protocol().0 == 6 { // TCP protocol
+                    if ip_packet.get_next_level_protocol().0 == 6 {
+                        // TCP protocol
                         let tcp_payload = ip_packet.payload();
-                        if tcp_payload.len() >= 20 { // Minimum TCP header size
+                        if tcp_payload.len() >= 20 {
+                            // Minimum TCP header size
                             let flags = tcp_payload[13];
-                            
+
                             if is_syn_packet(flags, is_incoming) {
-                                let window_size = u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
-                                let (options_str, mss, window_scale) = extract_tcp_options(tcp_payload);
+                                let window_size =
+                                    u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
+                                let (options_str, mss, window_scale) =
+                                    extract_tcp_options(tcp_payload);
 
                                 let fingerprint = Fingerprint::new(
                                     hostname.clone(),
@@ -163,7 +172,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     window_size,
                                     options_str,
                                     mss,
-                                    window_scale
+                                    window_scale,
                                 );
 
                                 // Write JSON line to file
