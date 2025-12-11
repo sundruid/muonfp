@@ -58,13 +58,30 @@ fn main() {
     env_logger::init();
     info!("MuonFP v.1.4");
 
-    if let Err(e) = run() {
+    // Parse command-line arguments
+    let args: Vec<String> = env::args().collect();
+    let stdout_output = args.iter().any(|arg| arg == "--stdout" || arg == "-s");
+
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!("MuonFP - open-source TCP fingerprinting");
+        println!();
+        println!("Usage: muonfp [OPTIONS]");
+        println!();
+        println!("Options:");
+        println!("  -s, --stdout    Output JSON fingerprints to stdout immediately");
+        println!("  -h, --help      Show this help message");
+        println!();
+        println!("Configuration is read from /etc/muonfp.conf");
+        return;
+    }
+
+    if let Err(e) = run(stdout_output) {
         error!("Error: {}", e);
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run(stdout_output: bool) -> Result<(), Box<dyn std::error::Error>> {
     let config = read_config()?;
 
     // Validate directories
@@ -175,8 +192,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     window_scale,
                                 );
 
+                                let json_output = fingerprint.to_json();
+
                                 // Write JSON line to file
-                                writeln!(fingerprint_writer, "{}", fingerprint.to_json())?;
+                                writeln!(fingerprint_writer, "{}", json_output)?;
+
+                                // Output to stdout if flag is enabled
+                                if stdout_output {
+                                    println!("{}", json_output);
+                                }
                             }
                         }
                     }
