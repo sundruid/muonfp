@@ -2,8 +2,9 @@ use config::{Config, File as ConfigFile, FileFormat};
 use ctrlc;
 use hostname;
 use log::{error, info, warn};
-use pnet::packet::ipv4::Ipv4Packet;
-use pnet::packet::Packet;
+use pnet::packet::{
+    ethernet::EtherTypes, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, ipv6::Ipv6Packet, Packet,
+};
 use std::env;
 use std::io::Write;
 use std::net::IpAddr;
@@ -20,7 +21,7 @@ use fingerprint::{extract_tcp_options, is_syn_packet, Fingerprint};
 use network_tap::{pcap_global_header, pcap_packet_header, NetworkTap};
 use rotating_writer::RotatingFileWriter;
 
-const VERSION: &str = "MuonFP v.1.4";
+const VERSION: &str = "MuonFP v.1.4.rc5";
 
 struct AppConfig {
     interface: String,
@@ -54,6 +55,56 @@ fn read_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
         pcap_dir: settings.get_string("pcap")?,
         max_file_size: settings.get_int("max_file_size")? as u64 * 1024 * 1024,
     })
+}
+
+fn process_tcp_payload(
+    hostname: &str,
+    local_ips: &std::collections::HashSet<IpAddr>,
+    fingerprint_writer: &mut RotatingFileWriter,
+    stdout_output: bool,
+    source_ip: IpAddr,
+    destination_ip: IpAddr,
+    tcp_payload: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (fingerprint_ip, is_incoming) = if local_ips.contains(&destination_ip) {
+        (source_ip, true)
+    } else if local_ips.contains(&source_ip) {
+        (destination_ip, false)
+    } else {
+        return Ok(());
+    };
+
+    let skip_ip = match fingerprint_ip {
+        IpAddr::V4(ip) => ip.is_broadcast() || ip.is_multicast() || ip.is_unspecified(),
+        IpAddr::V6(ip) => ip.is_multicast() || ip.is_unspecified(),
+    };
+    if skip_ip || tcp_payload.len() < 20 {
+        return Ok(());
+    }
+
+    let flags = tcp_payload[13];
+    if is_syn_packet(flags, is_incoming) {
+        let window_size = u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
+        let (options_str, mss, window_scale) = extract_tcp_options(tcp_payload);
+
+        let fingerprint = Fingerprint::new(
+            hostname.to_string(),
+            fingerprint_ip,
+            window_size,
+            options_str,
+            mss,
+            window_scale,
+        );
+
+        let json_output = fingerprint.to_json();
+        writeln!(fingerprint_writer, "{}", json_output)?;
+
+        if stdout_output {
+            println!("{}", json_output);
+        }
+    }
+
+    Ok(())
 }
 
 fn main() {
@@ -158,60 +209,38 @@ fn run(stdout_output: bool) -> Result<(), Box<dyn std::error::Error>> {
                     writer.write_packet(&full_packet)?;
                 }
 
-                if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
-                    let source_ip = IpAddr::V4(ip_packet.get_source());
-                    let destination_ip = IpAddr::V4(ip_packet.get_destination());
-
-                    // Process packets in both directions
-                    let (fingerprint_ip, is_incoming) = if local_ips.contains(&destination_ip) {
-                        (source_ip, true) // Incoming connection
-                    } else if local_ips.contains(&source_ip) {
-                        (destination_ip, false) // Outgoing connection response
-                    } else {
-                        continue; // Neither source nor destination is local, skip
-                    };
-
-                    // Skip broadcast, multicast, or unspecified IPs
-                    if let IpAddr::V4(ip) = fingerprint_ip {
-                        if ip.is_broadcast() || ip.is_multicast() || ip.is_unspecified() {
-                            continue;
-                        }
-                    }
-
-                    if ip_packet.get_next_level_protocol().0 == 6 {
-                        // TCP protocol
-                        let tcp_payload = ip_packet.payload();
-                        if tcp_payload.len() >= 20 {
-                            // Minimum TCP header size
-                            let flags = tcp_payload[13];
-
-                            if is_syn_packet(flags, is_incoming) {
-                                let window_size =
-                                    u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
-                                let (options_str, mss, window_scale) =
-                                    extract_tcp_options(tcp_payload);
-
-                                let fingerprint = Fingerprint::new(
-                                    hostname.clone(),
-                                    fingerprint_ip,
-                                    window_size,
-                                    options_str,
-                                    mss,
-                                    window_scale,
-                                );
-
-                                let json_output = fingerprint.to_json();
-
-                                // Write JSON line to file
-                                writeln!(fingerprint_writer, "{}", json_output)?;
-
-                                // Output to stdout if flag is enabled
-                                if stdout_output {
-                                    println!("{}", json_output);
-                                }
+                match ethernet.get_ethertype() {
+                    EtherTypes::Ipv4 => {
+                        if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
+                            if ip_packet.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
+                                process_tcp_payload(
+                                    &hostname,
+                                    &local_ips,
+                                    &mut fingerprint_writer,
+                                    stdout_output,
+                                    IpAddr::V4(ip_packet.get_source()),
+                                    IpAddr::V4(ip_packet.get_destination()),
+                                    ip_packet.payload(),
+                                )?;
                             }
                         }
                     }
+                    EtherTypes::Ipv6 => {
+                        if let Some(ip_packet) = Ipv6Packet::new(ethernet.payload()) {
+                            if ip_packet.get_next_header() == IpNextHeaderProtocols::Tcp {
+                                process_tcp_payload(
+                                    &hostname,
+                                    &local_ips,
+                                    &mut fingerprint_writer,
+                                    stdout_output,
+                                    IpAddr::V6(ip_packet.get_source()),
+                                    IpAddr::V6(ip_packet.get_destination()),
+                                    ip_packet.payload(),
+                                )?;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
 
                 // Check if we need to flush the writers
