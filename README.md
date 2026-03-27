@@ -46,8 +46,8 @@ This fingerprint is composed of the following elements extracted from the TCP pa
 
       mkdir muonfp  
       cd muonfp   
-      curl -O -L https://github.com/sundruid/muonfp/releases/download/v0.1.4_DEB/muonfp_deb_v_1_4.tar.gz
-      tar -xvf muonfp_deb_v_1_4.tar.gz
+      curl -O -L https://github.com/sundruid/muonfp/releases/download/muonfp_DEB_1.4.RC5/muonfp_DEB_1.4.RC5.tar.gz
+      tar -xvf muonfp_DEB_1.4.RC5.tar.gz
       sudo ./install.sh
    
 /etc/muonfp.conf
