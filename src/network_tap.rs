@@ -43,7 +43,7 @@ impl NetworkTap {
         Ok(NetworkTap { rx, local_ips })
     }
 
-    pub fn next_packet(&mut self) -> io::Result<EthernetPacket> {
+    pub fn next_packet(&mut self) -> io::Result<EthernetPacket<'_>> {
         match self.rx.next() {
             Ok(packet) => Ok(EthernetPacket::new(packet).unwrap()),
             Err(e) => Err(io::Error::new(

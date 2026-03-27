@@ -20,6 +20,8 @@ use fingerprint::{extract_tcp_options, is_syn_packet, Fingerprint};
 use network_tap::{pcap_global_header, pcap_packet_header, NetworkTap};
 use rotating_writer::RotatingFileWriter;
 
+const VERSION: &str = "MuonFP v.1.4";
+
 struct AppConfig {
     interface: String,
     fingerprints_dir: String,
@@ -55,12 +57,14 @@ fn read_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
 }
 
 fn main() {
-    env_logger::init();
-    info!("MuonFP v.1.4");
-
     // Parse command-line arguments
     let args: Vec<String> = env::args().collect();
     let stdout_output = args.iter().any(|arg| arg == "--stdout" || arg == "-s");
+
+    if args.iter().any(|arg| arg == "--version" || arg == "-v") {
+        println!("{}", VERSION);
+        return;
+    }
 
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         println!("MuonFP - open-source TCP fingerprinting");
@@ -68,12 +72,16 @@ fn main() {
         println!("Usage: muonfp [OPTIONS]");
         println!();
         println!("Options:");
+        println!("  -v, --version   Show version information");
         println!("  -s, --stdout    Output JSON fingerprints to stdout immediately");
         println!("  -h, --help      Show this help message");
         println!();
         println!("Configuration is read from /etc/muonfp.conf");
         return;
     }
+
+    env_logger::init();
+    info!("{}", VERSION);
 
     if let Err(e) = run(stdout_output) {
         error!("Error: {}", e);
