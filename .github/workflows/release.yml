@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-debian:
+    runs-on: ubuntu-latest
+    container: debian:12-slim
+    steps:
+      - name: Install build prerequisites
+        run: |
+          apt-get update
+          apt-get install --yes build-essential ca-certificates curl file git gzip lintian shellcheck
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+            sh -s -- -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Validate source and scripts
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo test --locked
+          shellcheck install.sh packaging/build-release.sh packaging/test-release.sh \
+            packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm
+      - name: Build release artifacts
+        run: packaging/build-release.sh
+      - name: Validate release artifacts
+        run: |
+          packaging/test-release.sh
+          lintian --fail-on error dist/*.deb
+          file dist/muonfp-v*-debian12-amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: muonfp-release
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-debian
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: muonfp-release
+          path: dist
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: gh release create "$TAG" dist/* --verify-tag --title "MuonFP $TAG" --notes-file RELEASE_NOTES.md

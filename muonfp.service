@@ -1,0 +1,24 @@
+[Unit]
+Description=MuonFP TCP fingerprint sensor
+Documentation=https://github.com/sundruid/muonfp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/muonfp
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGINT
+TimeoutStopSec=15s
+User=root
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/fingerprints /var/log/pcaps
+RestrictAddressFamilies=AF_PACKET AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

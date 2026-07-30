@@ -1,79 +1,158 @@
-![muonfp_logo](https://github.com/user-attachments/assets/ec3a4b97-ddd0-4b12-b6bd-d02954d46c64)
+![MuonFP logo](https://github.com/user-attachments/assets/ec3a4b97-ddd0-4b12-b6bd-d02954d46c64)
 
-# Overview:  
-MuonFP is an open-source tool designed for TCP fingerprinting, enabling the identification and classification of network traffic based on unique TCP packet characteristics. It is particularly useful for network security professionals and researchers aiming to detect and analyze reconnaissance activities, such as port scanning, by generating and analyzing TCP fingerprints. MuonFP is developed to disrupt the reconnaissance phase of cyber attacks, making it harder for adversaries to gather critical information about network infrastructure.
+# MuonFP
 
-This tool is part of a broader effort to enhance network security by focusing on the TCP layer (Layer 4) of the OSI model, providing a complementary approach to traditional IP-based blocking methods. MuonFP can be integrated with other security tools, such as firewalls, to block traffic based on identified fingerprints, adding an additional layer of defense against malicious activities.
+MuonFP is an open-source passive TCP fingerprint sensor. It observes TCP SYN
+and SYN-ACK packets and records a compact signature derived from the TCP window
+size, option order, MSS, and window scale.
 
-Read the Whitepaper: ["There is No Such Thing as a 'Benign' Internet Scanner"](https://www.kenwebster.com/index.php/2025/01/29/there-is-no-such-thing-as-a-benign-internet-scanner/)  
+MuonFP is useful for network-security research, reconnaissance detection, and
+feeding fingerprint-aware tools such as
+[Fingerprint Firewall](https://github.com/sundruid/fpfw).
 
-# Features:  
-- TCP Fingerprint Generation: Generates unique fingerprints based on TCP packet attributes, such as TCP options, window sizes, and sequence numbers.  
-- Reconnaissance Detection: Identifies patterns indicative of scanning activities, including those from fast scanners targeting large IP ranges.  
-- Integration with Firewalls: Compatible with tools like Fingerprint Firewall (fpfw) for blocking traffic based on MuonFP fingerprints.  
-- Legacy Data Support: Allows conversion of legacy TCP fingerprint data (e.g., p0f signatures) into MuonFP-compatible formats for enhanced detection capabilities.  
-- Customizable Fingerprint Blocking: Supports wildcard matching for blocking specific fingerprint patterns, enhancing flexibility in security configurations.  
-- Cross-Platform Compatibility: Designed to run on various operating systems, including Linux, macOS, and Windows, under the GPL license.  
+Read the background paper:
+[There is No Such Thing as a “Benign” Internet Scanner](https://www.kenwebster.com/index.php/2025/01/29/there-is-no-such-thing-as-a-benign-internet-scanner/).
 
-# Fingerprint Format
-The fingerprint is generated from the pseudo-unique configurations within the TCP settings, specifically during the SYN and SYN-ACK handshake stages. This fingerprint, shaped by the underlying operating system and software stack of the manufacturer, creates a distinct signature that can be traced and analyzed for various purposes. These purposes may include network security, device identification, and traffic monitoring, offering a relatively unique identifier that can be used to profile and track devices across different networks.  
+## Features
 
-Example:  
+- IPv4 and IPv6 TCP SYN/SYN-ACK fingerprinting.
+- IPv6 extension-header traversal for common option and fragment headers.
+- JSON Lines fingerprint output with UTC timestamps and sensor hostname.
+- Rotating fingerprint and PCAP output with restart-safe active logs.
+- Optional immediate JSON output through `--stdout`.
+- Automatic Linux interface selection or an explicit configured interface.
+- `/dev/null` support when PCAP recording is not wanted.
+- systemd service and Debian release artifacts.
 
-## **26847:2-4-8-1-3:1460:8**  
+MuonFP records fingerprints; policy matching and traffic blocking are performed
+by downstream tools such as Fingerprint Firewall.
 
+## Fingerprint format
 
-This fingerprint is composed of the following elements extracted from the TCP packet header during the connection negotiation process:  
+Example:
 
-- TCP Window Size  
-- TCP Options as found in the KIND settings that include a number and are kept in strict order as this is quasi unique
-- TCP Maximum Segment Size (MSS) which can provide interesting info including use of VPNs
-- TCP Window Scale, which is a scaling factor used for TCP Window Size and allows for larger TCP windows
+```text
+26847:2-4-8-1-3:1460:8
+```
 
-# 0.1.4 Update
+The four fields are:
 
-- Fixed how specifying /dev/null in the muonfp.conf pcap path is handled by the log writer
-- Added a -uninstall to the install.sh script
-  
-# 0.1.3 Update
+1. TCP window size.
+2. TCP option Kind values in their exact on-wire order.
+3. TCP Maximum Segment Size.
+4. TCP window scale.
 
-- Uses muonfp.conf to provide configurable file paths for logging with filesize limits
-- Rotating logging
-- Converted muonfp fingerprinting output to json single line delimited format, added timestamp field
-- Refactored code files to ease maintenance
+See [MuonFP Fingerprint Specification](MuonFP%20Fingerprint%20Specification.md)
+for the draft format specification.
 
-# Install Instructions (example in Debian)
+## Command line
 
-      mkdir muonfp  
-      cd muonfp   
-      curl -O -L https://github.com/sundruid/muonfp/releases/download/muonfp_DEB_1.4.RC5/muonfp_DEB_1.4.RC5.tar.gz
-      tar -xvf muonfp_DEB_1.4.RC5.tar.gz
-      sudo ./install.sh
-   
-/etc/muonfp.conf
+```text
+MuonFP - open-source TCP fingerprinting
 
-    interface=eth0                         # do an 'ip addr show' to find interface name
-    fingerprints=/var/log/fingerprints     # your directory of choice
-    pcap=/var/log/pcaps                    # your directory of choice, you can set to /dev/null if you do not want pcaps
-    max_file_size=10                       # max file size before log rotation occurs in MB
+Usage: muonfp [OPTIONS]
 
-If you do not want to install as a service, do NOT run the install.sh script and instead adjust the .conf file with the locations you want to store data and execute at the CLI.
+Options:
+  -v, --version, -version  Show version information
+  -s, --stdout             Output JSON fingerprints to stdout immediately
+      --list-interfaces     List available capture interfaces
+  -h, --help               Show this help message
+```
 
-# Compile instructions
+All version forms report the Cargo package version:
 
-    Install Rust via their instructions:
-    https://www.rust-lang.org/tools/install
-    
-    Clone the repo: 
-    git clone https://github.com/sundruid/muonfp.git
+```console
+$ muonfp --version
+MuonFP v1.5.0
+```
 
-    cd into the directory and execute:
-    cargo build --release
+## Debian installation
 
-    Your binary will be target/release/muonfp
-    
+MuonFP 1.5.0 Linux artifacts are built on Debian 12 amd64 and support Debian 12
+and Debian 13 amd64.
 
+### Debian package
 
-Interested in a Firewall for fingerprinting? Checkout sundruid/fpfw that will automatically block based on fingerprint using nftables.
+```bash
+curl -LO https://github.com/sundruid/muonfp/releases/download/v1.5.0/muonfp_1.5.0-1_amd64.deb
+sudo apt install ./muonfp_1.5.0-1_amd64.deb
+```
 
-sundruid@protonmail.com
+### Compatibility installer
+
+```bash
+curl -LO https://github.com/sundruid/muonfp/releases/download/v1.5.0/muonfp-v1.5.0-debian12-amd64.tar.gz
+tar -xzf muonfp-v1.5.0-debian12-amd64.tar.gz
+cd muonfp-v1.5.0
+sudo ./install.sh
+```
+
+The installer preserves an existing `/etc/muonfp.conf`. Uninstalling also
+preserves configuration and logs by default:
+
+```bash
+sudo ./install.sh --uninstall
+```
+
+Use `--uninstall --purge` only when configuration and collected log data should
+also be deleted.
+
+### Binary-only upgrade
+
+Existing manual installations can replace only the executable:
+
+```bash
+curl -LO https://github.com/sundruid/muonfp/releases/download/v1.5.0/muonfp-v1.5.0-debian12-amd64
+sudo systemctl stop muonfp
+sudo cp /usr/local/bin/muonfp /usr/local/bin/muonfp.previous
+sudo install -m755 muonfp-v1.5.0-debian12-amd64 /usr/local/bin/muonfp
+/usr/local/bin/muonfp --version
+sudo systemctl start muonfp
+```
+
+Verify downloads against `SHA256SUMS` from the release before installation.
+
+## Configuration
+
+The service reads `/etc/muonfp.conf`:
+
+```ini
+interface=auto
+fingerprints=/var/log/fingerprints
+pcap=/var/log/pcaps
+max_file_size=10
+```
+
+- `interface=auto` selects the Linux default-route interface. Use
+  `muonfp --list-interfaces` and set a name explicitly when needed.
+- Set `pcap=/dev/null` to disable PCAP recording.
+- `max_file_size` is the rotation threshold in MiB and must be greater than
+  zero.
+
+Packet capture requires root or `CAP_NET_RAW`.
+
+## Build from source
+
+MuonFP requires Rust 1.85 or newer:
+
+```bash
+git clone https://github.com/sundruid/muonfp.git
+cd muonfp
+cargo build --release --locked
+./target/release/muonfp --version
+```
+
+Before submitting a change:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked
+```
+
+## License
+
+MuonFP source code is released under the [MIT License](LICENSE). The fingerprint
+format specification carries its own CC BY 4.0 notice.
+
+Contact: sundruid@protonmail.com

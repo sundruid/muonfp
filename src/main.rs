@@ -1,7 +1,6 @@
 use config::{Config, File as ConfigFile, FileFormat};
-use ctrlc;
-use hostname;
 use log::{error, info, warn};
+use pnet::datalink;
 use pnet::packet::{
     ethernet::EtherTypes, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, ipv6::Ipv6Packet, Packet,
 };
@@ -21,7 +20,15 @@ use fingerprint::{extract_tcp_options, is_syn_packet, Fingerprint};
 use network_tap::{pcap_global_header, pcap_packet_header, NetworkTap};
 use rotating_writer::RotatingFileWriter;
 
-const VERSION: &str = "MuonFP v.1.4.rc5";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Debug, PartialEq)]
+enum CliAction {
+    Run { stdout_output: bool },
+    Version,
+    Help,
+    ListInterfaces,
+}
 
 struct AppConfig {
     interface: String,
@@ -49,12 +56,62 @@ fn read_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
 
     let settings = builder.build()?;
 
+    let max_file_size_mb = settings.get_int("max_file_size")?;
+    if max_file_size_mb <= 0 {
+        return Err("max_file_size must be greater than zero".into());
+    }
+    let max_file_size = u64::try_from(max_file_size_mb)?
+        .checked_mul(1024 * 1024)
+        .ok_or("max_file_size is too large")?;
+
     Ok(AppConfig {
         interface: settings.get_string("interface")?,
         fingerprints_dir: settings.get_string("fingerprints")?,
         pcap_dir: settings.get_string("pcap")?,
-        max_file_size: settings.get_int("max_file_size")? as u64 * 1024 * 1024,
+        max_file_size,
     })
+}
+
+fn parse_cli_args(args: &[String]) -> Result<CliAction, String> {
+    let mut stdout_output = false;
+
+    for argument in args.iter().skip(1) {
+        match argument.as_str() {
+            "-v" | "--version" | "-version" => return Ok(CliAction::Version),
+            "-h" | "--help" | "-help" => return Ok(CliAction::Help),
+            "--list-interfaces" => return Ok(CliAction::ListInterfaces),
+            "-s" | "--stdout" => stdout_output = true,
+            unknown => return Err(format!("unknown option: {unknown}")),
+        }
+    }
+
+    Ok(CliAction::Run { stdout_output })
+}
+
+fn print_help() {
+    println!("MuonFP - open-source TCP fingerprinting");
+    println!();
+    println!("Usage: muonfp [OPTIONS]");
+    println!();
+    println!("Options:");
+    println!("  -v, --version, -version  Show version information");
+    println!("  -s, --stdout             Output JSON fingerprints to stdout immediately");
+    println!("      --list-interfaces     List available capture interfaces");
+    println!("  -h, --help               Show this help message");
+    println!();
+    println!("Configuration is read from muonfp.conf or /etc/muonfp.conf");
+}
+
+fn list_interfaces() {
+    for interface in datalink::interfaces() {
+        let addresses = interface
+            .ips
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("{}\t{}", interface.name, addresses);
+    }
 }
 
 fn process_tcp_payload(
@@ -85,7 +142,10 @@ fn process_tcp_payload(
     let flags = tcp_payload[13];
     if is_syn_packet(flags, is_incoming) {
         let window_size = u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
-        let (options_str, mss, window_scale) = extract_tcp_options(tcp_payload);
+        let Some((options_str, mss, window_scale)) = extract_tcp_options(tcp_payload) else {
+            warn!("Ignoring malformed TCP header from {}", fingerprint_ip);
+            return Ok(());
+        };
 
         let fingerprint = Fingerprint::new(
             hostname.to_string(),
@@ -96,7 +156,7 @@ fn process_tcp_payload(
             window_scale,
         );
 
-        let json_output = fingerprint.to_json();
+        let json_output = fingerprint.to_json()?;
         writeln!(fingerprint_writer, "{}", json_output)?;
 
         if stdout_output {
@@ -107,32 +167,80 @@ fn process_tcp_payload(
     Ok(())
 }
 
+fn ipv6_tcp_payload(mut next_header: u8, mut payload: &[u8]) -> Option<&[u8]> {
+    for _ in 0..16 {
+        if next_header == IpNextHeaderProtocols::Tcp.0 {
+            return Some(payload);
+        }
+
+        let extension_length = match next_header {
+            // Hop-by-Hop Options, Routing, and Destination Options.
+            0 | 43 | 60 => {
+                if payload.len() < 2 {
+                    return None;
+                }
+                (usize::from(payload[1]) + 1) * 8
+            }
+            // Fragment header. Non-initial fragments do not contain a TCP header.
+            44 => {
+                if payload.len() < 8 {
+                    return None;
+                }
+                let fragment_offset_and_flags = u16::from_be_bytes([payload[2], payload[3]]);
+                if fragment_offset_and_flags & 0xfff8 != 0 {
+                    return None;
+                }
+                8
+            }
+            // Authentication Header.
+            51 => {
+                if payload.len() < 2 {
+                    return None;
+                }
+                (usize::from(payload[1]) + 2) * 4
+            }
+            _ => return None,
+        };
+
+        if extension_length > payload.len() {
+            return None;
+        }
+        next_header = payload[0];
+        payload = &payload[extension_length..];
+    }
+
+    None
+}
+
 fn main() {
-    // Parse command-line arguments
     let args: Vec<String> = env::args().collect();
-    let stdout_output = args.iter().any(|arg| arg == "--stdout" || arg == "-s");
+    let action = match parse_cli_args(&args) {
+        Ok(action) => action,
+        Err(message) => {
+            eprintln!("{message}");
+            print_help();
+            std::process::exit(2);
+        }
+    };
 
-    if args.iter().any(|arg| arg == "--version" || arg == "-v") {
-        println!("{}", VERSION);
-        return;
-    }
-
-    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
-        println!("MuonFP - open-source TCP fingerprinting");
-        println!();
-        println!("Usage: muonfp [OPTIONS]");
-        println!();
-        println!("Options:");
-        println!("  -v, --version   Show version information");
-        println!("  -s, --stdout    Output JSON fingerprints to stdout immediately");
-        println!("  -h, --help      Show this help message");
-        println!();
-        println!("Configuration is read from /etc/muonfp.conf");
-        return;
-    }
+    let stdout_output = match action {
+        CliAction::Version => {
+            println!("MuonFP v{VERSION}");
+            return;
+        }
+        CliAction::Help => {
+            print_help();
+            return;
+        }
+        CliAction::ListInterfaces => {
+            list_interfaces();
+            return;
+        }
+        CliAction::Run { stdout_output } => stdout_output,
+    };
 
     env_logger::init();
-    info!("{}", VERSION);
+    info!("MuonFP v{}", VERSION);
 
     if let Err(e) = run(stdout_output) {
         error!("Error: {}", e);
@@ -180,7 +288,7 @@ fn run(stdout_output: bool) -> Result<(), Box<dyn std::error::Error>> {
         |_| Ok(()),
     )?;
 
-    info!("Listening on interface: {}", config.interface);
+    info!("Listening on interface: {}", network_tap.interface_name);
 
     // Setup graceful shutdown
     let running = Arc::new(AtomicBool::new(true));
@@ -227,7 +335,9 @@ fn run(stdout_output: bool) -> Result<(), Box<dyn std::error::Error>> {
                     }
                     EtherTypes::Ipv6 => {
                         if let Some(ip_packet) = Ipv6Packet::new(ethernet.payload()) {
-                            if ip_packet.get_next_header() == IpNextHeaderProtocols::Tcp {
+                            if let Some(tcp_payload) =
+                                ipv6_tcp_payload(ip_packet.get_next_header().0, ip_packet.payload())
+                            {
                                 process_tcp_payload(
                                     &hostname,
                                     &local_ips,
@@ -235,7 +345,7 @@ fn run(stdout_output: bool) -> Result<(), Box<dyn std::error::Error>> {
                                     stdout_output,
                                     IpAddr::V6(ip_packet.get_source()),
                                     IpAddr::V6(ip_packet.get_destination()),
-                                    ip_packet.payload(),
+                                    tcp_payload,
                                 )?;
                             }
                         }
@@ -266,4 +376,68 @@ fn run(stdout_output: bool) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn package_version_is_1_5_0() {
+        assert_eq!(VERSION, "1.5.0");
+    }
+
+    #[test]
+    fn accepts_all_version_aliases() {
+        for option in ["-v", "--version", "-version"] {
+            assert_eq!(
+                parse_cli_args(&args(&["muonfp", option])),
+                Ok(CliAction::Version)
+            );
+        }
+    }
+
+    #[test]
+    fn parses_stdout_mode_and_rejects_unknown_options() {
+        assert_eq!(
+            parse_cli_args(&args(&["muonfp", "--stdout"])),
+            Ok(CliAction::Run {
+                stdout_output: true
+            })
+        );
+        assert_eq!(
+            parse_cli_args(&args(&["muonfp", "--unknown"])),
+            Err("unknown option: --unknown".to_string())
+        );
+    }
+
+    #[test]
+    fn finds_tcp_after_ipv6_extension_headers() {
+        let tcp_header = [0x11_u8; 20];
+        let mut hop_by_hop = vec![IpNextHeaderProtocols::Tcp.0, 0];
+        hop_by_hop.extend_from_slice(&[0_u8; 6]);
+        hop_by_hop.extend_from_slice(&tcp_header);
+
+        assert_eq!(
+            ipv6_tcp_payload(0, &hop_by_hop),
+            Some(tcp_header.as_slice())
+        );
+        assert_eq!(
+            ipv6_tcp_payload(IpNextHeaderProtocols::Tcp.0, &tcp_header),
+            Some(tcp_header.as_slice())
+        );
+    }
+
+    #[test]
+    fn rejects_truncated_or_non_initial_ipv6_fragments() {
+        assert_eq!(ipv6_tcp_payload(0, &[6, 1, 0, 0]), None);
+
+        let mut fragment = vec![IpNextHeaderProtocols::Tcp.0, 0, 0, 8, 0, 0, 0, 1];
+        fragment.extend_from_slice(&[0_u8; 20]);
+        assert_eq!(ipv6_tcp_payload(44, &fragment), None);
+    }
 }
