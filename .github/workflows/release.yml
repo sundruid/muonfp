@@ -18,7 +18,7 @@ jobs:
         run: |
           apt-get update
           apt-get install --yes build-essential ca-certificates curl file git gzip lintian shellcheck
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
@@ -38,7 +38,7 @@ jobs:
           packaging/test-release.sh
           lintian --fail-on error dist/*.deb
           file dist/muonfp-v*-debian12-amd64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: muonfp-release
           path: dist/
@@ -49,8 +49,8 @@ jobs:
     needs: build-debian
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: muonfp-release
           path: dist
