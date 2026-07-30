@@ -1,0 +1,13 @@
+#!/bin/sh
+
+set -e
+
+install -d -m 0755 /var/log/fingerprints /var/log/pcaps
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    systemctl enable muonfp.service >/dev/null 2>&1 || true
+    systemctl restart muonfp.service >/dev/null 2>&1 || true
+fi
+
+exit 0

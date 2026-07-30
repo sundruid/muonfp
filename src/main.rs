@@ -1,24 +1,34 @@
+use config::{Config, File as ConfigFile, FileFormat};
+use log::{error, info, warn};
+use pnet::datalink;
+use pnet::packet::{
+    ethernet::EtherTypes, ip::IpNextHeaderProtocols, ipv4::Ipv4Packet, ipv6::Ipv6Packet, Packet,
+};
+use std::env;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::env;
-use std::time::Duration;
-use pnet::packet::Packet;
-use pnet::packet::ipv4::Ipv4Packet;
-use log::{info, error, warn};
-use hostname;
-use config::{Config, File as ConfigFile, FileFormat};
-use ctrlc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 mod fingerprint;
-mod rotating_writer;
 mod network_tap;
+mod rotating_writer;
 
-use fingerprint::{Fingerprint, extract_tcp_options, is_syn_packet};
+use fingerprint::{extract_tcp_options, is_syn_packet, Fingerprint};
+use network_tap::{pcap_global_header, pcap_packet_header, NetworkTap};
 use rotating_writer::RotatingFileWriter;
-use network_tap::{NetworkTap, pcap_global_header, pcap_packet_header};
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Debug, PartialEq)]
+enum CliAction {
+    Run { stdout_output: bool },
+    Version,
+    Help,
+    ListInterfaces,
+}
 
 struct AppConfig {
     interface: String,
@@ -46,32 +56,210 @@ fn read_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
 
     let settings = builder.build()?;
 
+    let max_file_size_mb = settings.get_int("max_file_size")?;
+    if max_file_size_mb <= 0 {
+        return Err("max_file_size must be greater than zero".into());
+    }
+    let max_file_size = u64::try_from(max_file_size_mb)?
+        .checked_mul(1024 * 1024)
+        .ok_or("max_file_size is too large")?;
+
     Ok(AppConfig {
         interface: settings.get_string("interface")?,
         fingerprints_dir: settings.get_string("fingerprints")?,
         pcap_dir: settings.get_string("pcap")?,
-        max_file_size: settings.get_int("max_file_size")? as u64 * 1024 * 1024,
+        max_file_size,
     })
 }
 
-fn main() {
-    env_logger::init();
-    info!("MuonFP v.1.4");
+fn parse_cli_args(args: &[String]) -> Result<CliAction, String> {
+    let mut stdout_output = false;
 
-    if let Err(e) = run() {
+    for argument in args.iter().skip(1) {
+        match argument.as_str() {
+            "-v" | "--version" | "-version" => return Ok(CliAction::Version),
+            "-h" | "--help" | "-help" => return Ok(CliAction::Help),
+            "--list-interfaces" => return Ok(CliAction::ListInterfaces),
+            "-s" | "--stdout" => stdout_output = true,
+            unknown => return Err(format!("unknown option: {unknown}")),
+        }
+    }
+
+    Ok(CliAction::Run { stdout_output })
+}
+
+fn print_help() {
+    println!("MuonFP - open-source TCP fingerprinting");
+    println!();
+    println!("Usage: muonfp [OPTIONS]");
+    println!();
+    println!("Options:");
+    println!("  -v, --version, -version  Show version information");
+    println!("  -s, --stdout             Output JSON fingerprints to stdout immediately");
+    println!("      --list-interfaces     List available capture interfaces");
+    println!("  -h, --help               Show this help message");
+    println!();
+    println!("Configuration is read from muonfp.conf or /etc/muonfp.conf");
+}
+
+fn list_interfaces() {
+    for interface in datalink::interfaces() {
+        let addresses = interface
+            .ips
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!("{}\t{}", interface.name, addresses);
+    }
+}
+
+fn process_tcp_payload(
+    hostname: &str,
+    local_ips: &std::collections::HashSet<IpAddr>,
+    fingerprint_writer: &mut RotatingFileWriter,
+    stdout_output: bool,
+    source_ip: IpAddr,
+    destination_ip: IpAddr,
+    tcp_payload: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (fingerprint_ip, is_incoming) = if local_ips.contains(&destination_ip) {
+        (source_ip, true)
+    } else if local_ips.contains(&source_ip) {
+        (destination_ip, false)
+    } else {
+        return Ok(());
+    };
+
+    let skip_ip = match fingerprint_ip {
+        IpAddr::V4(ip) => ip.is_broadcast() || ip.is_multicast() || ip.is_unspecified(),
+        IpAddr::V6(ip) => ip.is_multicast() || ip.is_unspecified(),
+    };
+    if skip_ip || tcp_payload.len() < 20 {
+        return Ok(());
+    }
+
+    let flags = tcp_payload[13];
+    if is_syn_packet(flags, is_incoming) {
+        let window_size = u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
+        let Some((options_str, mss, window_scale)) = extract_tcp_options(tcp_payload) else {
+            warn!("Ignoring malformed TCP header from {}", fingerprint_ip);
+            return Ok(());
+        };
+
+        let fingerprint = Fingerprint::new(
+            hostname.to_string(),
+            fingerprint_ip,
+            window_size,
+            options_str,
+            mss,
+            window_scale,
+        );
+
+        let json_output = fingerprint.to_json()?;
+        writeln!(fingerprint_writer, "{}", json_output)?;
+
+        if stdout_output {
+            println!("{}", json_output);
+        }
+    }
+
+    Ok(())
+}
+
+fn ipv6_tcp_payload(mut next_header: u8, mut payload: &[u8]) -> Option<&[u8]> {
+    for _ in 0..16 {
+        if next_header == IpNextHeaderProtocols::Tcp.0 {
+            return Some(payload);
+        }
+
+        let extension_length = match next_header {
+            // Hop-by-Hop Options, Routing, and Destination Options.
+            0 | 43 | 60 => {
+                if payload.len() < 2 {
+                    return None;
+                }
+                (usize::from(payload[1]) + 1) * 8
+            }
+            // Fragment header. Non-initial fragments do not contain a TCP header.
+            44 => {
+                if payload.len() < 8 {
+                    return None;
+                }
+                let fragment_offset_and_flags = u16::from_be_bytes([payload[2], payload[3]]);
+                if fragment_offset_and_flags & 0xfff8 != 0 {
+                    return None;
+                }
+                8
+            }
+            // Authentication Header.
+            51 => {
+                if payload.len() < 2 {
+                    return None;
+                }
+                (usize::from(payload[1]) + 2) * 4
+            }
+            _ => return None,
+        };
+
+        if extension_length > payload.len() {
+            return None;
+        }
+        next_header = payload[0];
+        payload = &payload[extension_length..];
+    }
+
+    None
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    let action = match parse_cli_args(&args) {
+        Ok(action) => action,
+        Err(message) => {
+            eprintln!("{message}");
+            print_help();
+            std::process::exit(2);
+        }
+    };
+
+    let stdout_output = match action {
+        CliAction::Version => {
+            println!("MuonFP v{VERSION}");
+            return;
+        }
+        CliAction::Help => {
+            print_help();
+            return;
+        }
+        CliAction::ListInterfaces => {
+            list_interfaces();
+            return;
+        }
+        CliAction::Run { stdout_output } => stdout_output,
+    };
+
+    env_logger::init();
+    info!("MuonFP v{}", VERSION);
+
+    if let Err(e) = run(stdout_output) {
         error!("Error: {}", e);
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run(stdout_output: bool) -> Result<(), Box<dyn std::error::Error>> {
     let config = read_config()?;
 
     // Validate directories
     if !Path::new(&config.fingerprints_dir).is_dir() {
-        return Err(format!("Fingerprints directory does not exist: {}", config.fingerprints_dir).into());
+        return Err(format!(
+            "Fingerprints directory does not exist: {}",
+            config.fingerprints_dir
+        )
+        .into());
     }
-    
+
     // Special handling for /dev/null - skip PCAP writing entirely
     let skip_pcap = config.pcap_dir == "/dev/null";
     if !skip_pcap && !Path::new(&config.pcap_dir).is_dir() {
@@ -90,17 +278,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Path::new(&config.pcap_dir).join("packets"),
             config.max_file_size,
             "pcap",
-            move |file| file.write_all(&pcap_global_header)
+            move |file| file.write_all(&pcap_global_header),
         )?)
     };
     let mut fingerprint_writer = RotatingFileWriter::new(
         Path::new(&config.fingerprints_dir).join("muonfp"),
         config.max_file_size,
         "out",
-        |_| Ok(())
+        |_| Ok(()),
     )?;
 
-    info!("Listening on interface: {}", config.interface);
+    info!("Listening on interface: {}", network_tap.interface_name);
 
     // Setup graceful shutdown
     let running = Arc::new(AtomicBool::new(true));
@@ -119,58 +307,50 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         match network_tap.next_packet() {
             Ok(ethernet) => {
                 let packet_header = pcap_packet_header(ethernet.packet().len() as u32);
-                let mut full_packet = Vec::with_capacity(packet_header.len() + ethernet.packet().len());
+                let mut full_packet =
+                    Vec::with_capacity(packet_header.len() + ethernet.packet().len());
                 full_packet.extend_from_slice(&packet_header);
                 full_packet.extend_from_slice(ethernet.packet());
-                
+
                 // Only write PCAP if not skipping
                 if let Some(ref mut writer) = pcap_writer {
                     writer.write_packet(&full_packet)?;
                 }
 
-                if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
-                    let source_ip = IpAddr::V4(ip_packet.get_source());
-                    let destination_ip = IpAddr::V4(ip_packet.get_destination());
-
-                    // Process packets in both directions
-                    let (fingerprint_ip, is_incoming) = if local_ips.contains(&destination_ip) {
-                        (source_ip, true) // Incoming connection
-                    } else if local_ips.contains(&source_ip) {
-                        (destination_ip, false) // Outgoing connection response
-                    } else {
-                        continue; // Neither source nor destination is local, skip
-                    };
-
-                    // Skip broadcast, multicast, or unspecified IPs
-                    if let IpAddr::V4(ip) = fingerprint_ip {
-                        if ip.is_broadcast() || ip.is_multicast() || ip.is_unspecified() {
-                            continue;
-                        }
-                    }
-
-                    if ip_packet.get_next_level_protocol().0 == 6 { // TCP protocol
-                        let tcp_payload = ip_packet.payload();
-                        if tcp_payload.len() >= 20 { // Minimum TCP header size
-                            let flags = tcp_payload[13];
-                            
-                            if is_syn_packet(flags, is_incoming) {
-                                let window_size = u16::from_be_bytes([tcp_payload[14], tcp_payload[15]]);
-                                let (options_str, mss, window_scale) = extract_tcp_options(tcp_payload);
-
-                                let fingerprint = Fingerprint::new(
-                                    hostname.clone(),
-                                    fingerprint_ip,
-                                    window_size,
-                                    options_str,
-                                    mss,
-                                    window_scale
-                                );
-
-                                // Write JSON line to file
-                                writeln!(fingerprint_writer, "{}", fingerprint.to_json())?;
+                match ethernet.get_ethertype() {
+                    EtherTypes::Ipv4 => {
+                        if let Some(ip_packet) = Ipv4Packet::new(ethernet.payload()) {
+                            if ip_packet.get_next_level_protocol() == IpNextHeaderProtocols::Tcp {
+                                process_tcp_payload(
+                                    &hostname,
+                                    &local_ips,
+                                    &mut fingerprint_writer,
+                                    stdout_output,
+                                    IpAddr::V4(ip_packet.get_source()),
+                                    IpAddr::V4(ip_packet.get_destination()),
+                                    ip_packet.payload(),
+                                )?;
                             }
                         }
                     }
+                    EtherTypes::Ipv6 => {
+                        if let Some(ip_packet) = Ipv6Packet::new(ethernet.payload()) {
+                            if let Some(tcp_payload) =
+                                ipv6_tcp_payload(ip_packet.get_next_header().0, ip_packet.payload())
+                            {
+                                process_tcp_payload(
+                                    &hostname,
+                                    &local_ips,
+                                    &mut fingerprint_writer,
+                                    stdout_output,
+                                    IpAddr::V6(ip_packet.get_source()),
+                                    IpAddr::V6(ip_packet.get_destination()),
+                                    tcp_payload,
+                                )?;
+                            }
+                        }
+                    }
+                    _ => {}
                 }
 
                 // Check if we need to flush the writers
@@ -196,4 +376,68 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn package_version_is_1_5_0() {
+        assert_eq!(VERSION, "1.5.0");
+    }
+
+    #[test]
+    fn accepts_all_version_aliases() {
+        for option in ["-v", "--version", "-version"] {
+            assert_eq!(
+                parse_cli_args(&args(&["muonfp", option])),
+                Ok(CliAction::Version)
+            );
+        }
+    }
+
+    #[test]
+    fn parses_stdout_mode_and_rejects_unknown_options() {
+        assert_eq!(
+            parse_cli_args(&args(&["muonfp", "--stdout"])),
+            Ok(CliAction::Run {
+                stdout_output: true
+            })
+        );
+        assert_eq!(
+            parse_cli_args(&args(&["muonfp", "--unknown"])),
+            Err("unknown option: --unknown".to_string())
+        );
+    }
+
+    #[test]
+    fn finds_tcp_after_ipv6_extension_headers() {
+        let tcp_header = [0x11_u8; 20];
+        let mut hop_by_hop = vec![IpNextHeaderProtocols::Tcp.0, 0];
+        hop_by_hop.extend_from_slice(&[0_u8; 6]);
+        hop_by_hop.extend_from_slice(&tcp_header);
+
+        assert_eq!(
+            ipv6_tcp_payload(0, &hop_by_hop),
+            Some(tcp_header.as_slice())
+        );
+        assert_eq!(
+            ipv6_tcp_payload(IpNextHeaderProtocols::Tcp.0, &tcp_header),
+            Some(tcp_header.as_slice())
+        );
+    }
+
+    #[test]
+    fn rejects_truncated_or_non_initial_ipv6_fragments() {
+        assert_eq!(ipv6_tcp_payload(0, &[6, 1, 0, 0]), None);
+
+        let mut fragment = vec![IpNextHeaderProtocols::Tcp.0, 0, 0, 8, 0, 0, 0, 1];
+        fragment.extend_from_slice(&[0_u8; 20]);
+        assert_eq!(ipv6_tcp_payload(44, &fragment), None);
+    }
 }

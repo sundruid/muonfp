@@ -1,18 +1,23 @@
 [package]
 name = "muonfp"
-version = "0.1.0"
+version = "1.5.0"
 edition = "2021"
+rust-version = "1.85"
+description = "Passive TCP fingerprinting for IPv4 and IPv6 traffic"
+license = "MIT"
+repository = "https://github.com/sundruid/muonfp"
+readme = "README.md"
 
 [dependencies]
 pnet = "0.35.0"
-pcap = "2.0.0"
-time = "0.3.36"
-chrono = { version = "0.4.38", features = ["serde"] }
-serde = { version = "1.0.207", features = ["derive"] }
-serde_json = "1.0.124"
+chrono = { version = "0.4.45", features = ["serde"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+config = { version = "0.15.25", default-features = false, features = ["ini"] }
+log = "0.4.33"
+env_logger = "0.11.11"
+hostname = "0.4.2"
+ctrlc = "3.5.2"
 
-config = "0.14.0"
-log = "0.4.22"
-env_logger = "0.11.5"
-hostname = "0.4.0"
-ctrlc = "3.4.5"
+[dev-dependencies]
+tempfile = "3.27.0"

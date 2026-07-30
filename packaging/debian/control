@@ -1,0 +1,11 @@
+Package: muonfp
+Version: @VERSION@-1
+Section: net
+Priority: optional
+Architecture: @ARCH@
+Maintainer: Sundruid <sundruid@protonmail.com>
+Depends: libc6 (>= 2.36), libgcc-s1, systemd
+Homepage: https://github.com/sundruid/muonfp
+Description: Passive TCP fingerprint sensor
+ MuonFP captures TCP SYN and SYN-ACK packets and records compact TCP
+ fingerprints for IPv4 and IPv6 traffic.

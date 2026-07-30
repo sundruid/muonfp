@@ -1,108 +1,72 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# This script sets up the muonfp service and handles file operations
+set -Eeuo pipefail
 
-# Check for uninstall flag
-if [ "$1" = "-uninstall" ]; then
-    echo "Uninstalling muonfp..."
-    
-    # Stop and disable the service first
-    systemctl stop muonfp.service 2>/dev/null
-    systemctl disable muonfp.service 2>/dev/null
-    
-    # Remove the service file
-    rm -f /etc/systemd/system/muonfp.service
-    
-    # Reload systemd to recognize the removed service
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+BINARY_PATH="/usr/local/bin/muonfp"
+CONFIG_PATH="/etc/muonfp.conf"
+SERVICE_PATH="/etc/systemd/system/muonfp.service"
+
+if [[ "${EUID}" -ne 0 ]]; then
+    echo "Please run this installer as root." >&2
+    exit 1
+fi
+
+uninstall_muonfp() {
+    local purge="${1:-}"
+
+    systemctl disable --now muonfp.service 2>/dev/null || true
+    rm -f -- "${SERVICE_PATH}" "${BINARY_PATH}"
     systemctl daemon-reload
-    
-    # Remove the configuration file
-    rm -f /etc/muonfp.conf
-    
-    # Remove the executable
-    rm -f /usr/local/bin/muonfp
-    
-    # Remove log directories and all contents
-    rm -rf /var/log/pcaps
-    rm -rf /var/log/fingerprints
-    
-    echo "muonfp has been uninstalled successfully."
-    echo "Removed:"
-    echo "  - /etc/systemd/system/muonfp.service"
-    echo "  - /etc/muonfp.conf"
-    echo "  - /usr/local/bin/muonfp"
-    echo "  - /var/log/pcaps (and all contents)"
-    echo "  - /var/log/fingerprints (and all contents)"
-    exit 0
+
+    if [[ "${purge}" == "--purge" ]]; then
+        rm -f -- "${CONFIG_PATH}"
+        rm -rf -- /var/log/pcaps /var/log/fingerprints
+        echo "MuonFP, its configuration, and its log data were removed."
+    else
+        echo "MuonFP was removed. Configuration and log data were preserved."
+        echo "Use '$0 --uninstall --purge' to remove those files as well."
+    fi
+}
+
+case "${1:-}" in
+    -uninstall|--uninstall)
+        uninstall_muonfp "${2:-}"
+        exit 0
+        ;;
+    --help|-h)
+        echo "Usage: sudo ./install.sh [--uninstall [--purge]]"
+        exit 0
+        ;;
+    "")
+        ;;
+    *)
+        echo "Unknown installer option: $1" >&2
+        exit 2
+        ;;
+esac
+
+for required_file in muonfp muonfp.conf muonfp.service; do
+    if [[ ! -f "${SCRIPT_DIR}/${required_file}" ]]; then
+        echo "Missing release file: ${required_file}" >&2
+        exit 1
+    fi
+done
+
+install -Dm755 "${SCRIPT_DIR}/muonfp" "${BINARY_PATH}"
+install -Dm644 "${SCRIPT_DIR}/muonfp.service" "${SERVICE_PATH}"
+
+if [[ ! -e "${CONFIG_PATH}" ]]; then
+    install -Dm644 "${SCRIPT_DIR}/muonfp.conf" "${CONFIG_PATH}"
+else
+    echo "Preserving existing ${CONFIG_PATH}."
 fi
 
-# Check if script is run as root
-if [ "$EUID" -ne 0 ]
-  then echo "Please run as root"
-  exit
-fi
+install -d -m755 /var/log/pcaps /var/log/fingerprints
 
-# Copy muonfp.conf to /etc/
-cp ./muonfp.conf /etc/
-if [ $? -ne 0 ]; then
-    echo "Failed to copy muonfp.conf to /etc/"
-    exit 1
-fi
-
-# Set permissions for muonfp.conf
-chown root:root /etc/muonfp.conf
-chmod 644 /etc/muonfp.conf
-
-echo "muonfp.conf has been copied to /etc/ with correct permissions"
-
-# Move muonfp to /usr/local/bin/
-mv ./muonfp /usr/local/bin/
-if [ $? -ne 0 ]; then
-    echo "Failed to move muonfp to /usr/local/bin/"
-    exit 1
-fi
-
-# Set permissions for muonfp
-chown root:root /usr/local/bin/muonfp
-chmod 755 /usr/local/bin/muonfp
-
-echo "muonfp has been moved to /usr/local/bin/ with correct permissions"
-
-mkdir /var/log/pcaps
-mkdir /var/log/fingerprints
-
-echo "pcaps and fingerprints directories created in /var/log"
-
-# Create the service file
-cat << EOF > /etc/systemd/system/muonfp.service
-[Unit]
-Description=Muonfp Service
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/muonfp
-Restart=always
-User=root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Set correct permissions for the service file
-chown root:root /etc/systemd/system/muonfp.service
-chmod 644 /etc/systemd/system/muonfp.service
-
-# Reload systemd to recognize the new service
 systemctl daemon-reload
+systemctl enable --now muonfp.service
 
-# Enable the service to start on boot
-systemctl enable muonfp.service
-
-# Start the service
-systemctl start muonfp.service
-
-# Check the status of the service
-systemctl status muonfp.service
-
-echo "Muonfp service has been set up, enabled, and started."
-echo "Please check the status output above to ensure it's running correctly."
+echo "MuonFP $(muonfp --version) was installed successfully."
+echo "Configuration: ${CONFIG_PATH}"
+systemctl --no-pager --full status muonfp.service

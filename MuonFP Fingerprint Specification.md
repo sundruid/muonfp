@@ -58,11 +58,11 @@ Where:
 The following Augmented Backus–Naur Form (ABNF) defines the syntax using the core rules of RFC 5234:
 
 mfp = win ":" opts ":" mss ":" wscale
-win = 1DIGIT / wildcard
-opts = (optval "-") optval / empty
-optval = 1DIGIT
-mss = 1DIGIT / empty / wildcard
-wscale = 1*DIGIT / empty / wildcard
+win = 1*5DIGIT / wildcard
+opts = optval *("-" optval) / empty
+optval = 1*3DIGIT
+mss = 1*5DIGIT / empty / wildcard
+wscale = 1*3DIGIT / empty / wildcard
 empty = ""
 wildcard = "%"
 

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, RC.5, "agent/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup update stable
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - run: test "$(./target/release/muonfp --version)" = "MuonFP v1.5.0"
+      - run: test "$(./target/release/muonfp -version)" = "MuonFP v1.5.0"
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update
+      - run: sudo apt-get install --yes shellcheck
+      - run: shellcheck install.sh packaging/build-release.sh packaging/test-release.sh packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo install cargo-audit --locked --version 0.22.2
+      - run: cargo audit
