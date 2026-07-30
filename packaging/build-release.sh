@@ -47,6 +47,8 @@ install -m644 muonfp.conf "${DEB_ROOT}/etc/muonfp.conf"
 install -m644 packaging/muonfp.service "${DEB_ROOT}/lib/systemd/system/muonfp.service"
 install -m644 packaging/copyright "${DEB_ROOT}/usr/share/doc/muonfp/copyright"
 gzip -9cn CHANGELOG.md > "${DEB_ROOT}/usr/share/doc/muonfp/changelog.gz"
+sed "s/@VERSION@/${VERSION}/g" packaging/debian/changelog |
+    gzip -9cn > "${DEB_ROOT}/usr/share/doc/muonfp/changelog.Debian.gz"
 
 sed \
     -e "s/@VERSION@/${VERSION}/g" \
