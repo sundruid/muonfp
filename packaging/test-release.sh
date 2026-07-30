@@ -11,7 +11,9 @@ BINARY="dist/muonfp-v${VERSION}-debian12-${ARCH}"
 DEB="dist/muonfp_${VERSION}-1_${ARCH}.deb"
 TARBALL="dist/muonfp-v${VERSION}-debian12-${ARCH}.tar.gz"
 
-sha256sum --check dist/SHA256SUMS
+pushd dist >/dev/null
+sha256sum --check SHA256SUMS
+popd >/dev/null
 test -x "${BINARY}"
 test "$("${BINARY}" --version)" = "MuonFP v${VERSION}"
 test "$("${BINARY}" -version)" = "MuonFP v${VERSION}"
