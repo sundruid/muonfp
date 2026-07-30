@@ -1,0 +1,6 @@
+muonfp (@VERSION@-1) stable; urgency=medium
+
+  * Release MuonFP 1.5.0.
+  * Add Debian 12 amd64 package and standalone binary artifacts.
+
+ -- Sundruid <sundruid@protonmail.com>  Thu, 30 Jul 2026 08:15:00 -0700
